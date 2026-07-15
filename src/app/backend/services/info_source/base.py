@@ -41,8 +41,21 @@ class InfoSourceAdapter(ABC):
         """Probe the source; return health + (optionally) item count."""
 
     @abstractmethod
-    def fetch_new_items(self, since: datetime | None = None) -> list[InfoItemData]:
-        """Fetch items newer than ``since`` (None = all)."""
+    def fetch_new_items(
+        self,
+        since: datetime | None = None,
+        known_ids: set[str] | None = None,
+    ) -> list[InfoItemData]:
+        """Fetch items to sync.
+
+        ``since`` is the source's last sync time; ``known_ids`` are external ids
+        already stored. Adapters should return items that are **newer than
+        ``since`` OR not in ``known_ids``** (incremental + backfill), so that:
+
+        - first sync (``since=None``, empty ``known_ids``) returns everything;
+        - subsequent syncs skip known-unchanged items (no re-read) and only
+          return new / modified / not-yet-backed-filled items.
+        """
 
     @staticmethod
     def required_config_keys() -> list[str]:

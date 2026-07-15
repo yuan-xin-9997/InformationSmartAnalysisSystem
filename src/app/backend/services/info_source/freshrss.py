@@ -74,7 +74,12 @@ class FreshRSSAdapter(InfoSourceAdapter):
         except Exception as exc:
             return SourceStatus(ok=False, message=str(exc))
 
-    def fetch_new_items(self, since: datetime | None = None) -> list[InfoItemData]:
+    def fetch_new_items(
+        self,
+        since: datetime | None = None,
+        known_ids: set[str] | None = None,
+    ) -> list[InfoItemData]:
+        known = known_ids or set()
         params: dict = {"n": self.max_items}
         if since:
             params["ot"] = int(since.timestamp())
@@ -82,6 +87,8 @@ class FreshRSSAdapter(InfoSourceAdapter):
         items: list[InfoItemData] = []
         for it in data.get("items", []):
             item_id = str(it.get("id", ""))
+            if item_id in known:
+                continue  # 已索引，跳过（增量）
             title = it.get("title", "") or ""
             url = None
             for alt in it.get("alternate", []) or []:

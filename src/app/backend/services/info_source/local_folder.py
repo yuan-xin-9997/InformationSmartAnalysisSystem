@@ -58,7 +58,7 @@ class LocalFolderAdapter(InfoSourceAdapter):
             "*.html",
         ]
         self.recursive: bool = bool(config.get("recursive", True))
-        self.max_items: int = int(config.get("max_items") or 50)
+        self.max_items: int = int(config.get("max_items") or 100000)
 
     @staticmethod
     def required_config_keys() -> list[str]:
@@ -68,10 +68,14 @@ class LocalFolderAdapter(InfoSourceAdapter):
         if not self.folder_path.exists():
             return
         glob = self.folder_path.rglob if self.recursive else self.folder_path.glob
+        seen: set[str] = set()
         for pattern in self.patterns:
             for f in glob(pattern):
                 if f.is_file():
-                    yield f
+                    key = str(f)
+                    if key not in seen:
+                        seen.add(key)
+                        yield f
 
     def check_status(self) -> SourceStatus:
         if not self.folder_path.exists():
@@ -79,18 +83,26 @@ class LocalFolderAdapter(InfoSourceAdapter):
         count = sum(1 for _ in self._iter_files())
         return SourceStatus(ok=True, message=f"共 {count} 个匹配文件", item_count=count)
 
-    def fetch_new_items(self, since: datetime | None = None) -> list[InfoItemData]:
+    def fetch_new_items(
+        self,
+        since: datetime | None = None,
+        known_ids: set[str] | None = None,
+    ) -> list[InfoItemData]:
+        known = known_ids or set()
         items: list[InfoItemData] = []
-        for f in self._iter_files():
+        # 按路径排序，保证同步顺序确定、可解释（不依赖文件系统遍历顺序）。
+        for f in sorted(self._iter_files()):
+            ext_id = str(f.resolve())
             mtime = datetime.fromtimestamp(f.stat().st_mtime, tz=timezone.utc)
-            if since and mtime <= since:
+            # 增量 + 回补：已索引且未变更的文件跳过，不重读内容。
+            if since and ext_id in known and mtime <= since:
                 continue
             content = extract_text(f)
             if content is None:
                 continue
             items.append(
                 InfoItemData(
-                    external_id=str(f.resolve()),
+                    external_id=ext_id,
                     title=f.name,
                     url=str(f),
                     content=content,

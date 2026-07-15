@@ -57,7 +57,7 @@
 ### 信息源配置示例
 
 - 官方网站：`{"url":"https://example.com/news","link_selector":"a.news","content_selector":"article","mode":"auto","max_items":20}`
-- 本地文件夹：`{"folder_path":"/abs/path","patterns":["*.txt","*.md","*.pdf","*.docx","*.html"],"recursive":true,"max_items":50}`
+- 本地文件夹：`{"folder_path":"/abs/path","patterns":["*.txt","*.md","*.pdf","*.docx","*.html"],"recursive":true,"max_items":100000}`
 - FreshRSS：`{"base_url":"http://freshrss.example.com","user":"admin","api_token":"<API Token>","stream":"user/-/state/com.google/reading-list","mark_as_read":false,"max_items":50}`
 
 ## 部署方式

@@ -34,9 +34,15 @@ class WebsiteAdapter(InfoSourceAdapter):
         except WebFetchError as exc:
             return SourceStatus(ok=False, message=str(exc))
 
-    def fetch_new_items(self, since: datetime | None = None) -> list[InfoItemData]:
-        # The listing page is re-scanned each sync; dedup by URL happens in the
-        # sync service (existing external_id -> skipped), so ``since`` is unused.
+    def fetch_new_items(
+        self,
+        since: datetime | None = None,
+        known_ids: set[str] | None = None,
+    ) -> list[InfoItemData]:
+        # The listing page is re-scanned each sync. ``known_ids`` (already-indexed
+        # URLs) are skipped so we only fetch new articles (incremental). ``since``
+        # is unused -- websites have no reliable modification timestamp.
+        known = known_ids or set()
         html = self._client.fetch_html(self.url, mode=self.mode)
         soup = BeautifulSoup(html, "lxml")
 
@@ -47,7 +53,7 @@ class WebsiteAdapter(InfoSourceAdapter):
             if not href or href.startswith("#"):
                 continue
             abs_url = urljoin(self.base_url, href)
-            if abs_url in seen:
+            if abs_url in seen or abs_url in known:
                 continue
             seen.add(abs_url)
             links.append((abs_url, a.get_text(strip=True) or abs_url))

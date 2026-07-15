@@ -43,21 +43,24 @@ def run_sync(run_id: int, source_id: int) -> None:
 
         try:
             adapter = get_adapter(source.type, source.config or {})
-            items = adapter.fetch_new_items()
+            # 批量加载已存在条目 (external_id -> content_hash)，供增量回补与去重，
+            # 避免逐条 N+1 查询（6000 文件时性能差距显著）。
+            existing: dict[str, str] = {
+                eid: ch
+                for eid, ch in db.query(InfoItem.external_id, InfoItem.content_hash)
+                .filter(InfoItem.source_id == source_id)
+                .all()
+            }
+            items = adapter.fetch_new_items(
+                since=source.last_sync_at,
+                known_ids=set(existing.keys()),
+            )
             new_count = 0
             updated_count = 0
             now = utcnow()
             for it in items:
                 ch = _content_hash(it.content or it.external_id)
-                existing = (
-                    db.query(InfoItem)
-                    .filter(
-                        InfoItem.source_id == source_id,
-                        InfoItem.external_id == it.external_id,
-                    )
-                    .first()
-                )
-                if existing is None:
+                if it.external_id not in existing:
                     db.add(
                         InfoItem(
                             source_id=source_id,
@@ -71,13 +74,21 @@ def run_sync(run_id: int, source_id: int) -> None:
                         )
                     )
                     new_count += 1
-                elif existing.content_hash != ch:
-                    existing.title = it.title
-                    existing.content = it.content
-                    existing.content_hash = ch
-                    existing.published_at = it.published_at
-                    existing.fetched_at = now
-                    existing.analyzed = False
+                elif existing[it.external_id] != ch:
+                    db.query(InfoItem).filter(
+                        InfoItem.source_id == source_id,
+                        InfoItem.external_id == it.external_id,
+                    ).update(
+                        {
+                            InfoItem.title: it.title,
+                            InfoItem.content: it.content,
+                            InfoItem.content_hash: ch,
+                            InfoItem.published_at: it.published_at,
+                            InfoItem.fetched_at: now,
+                            InfoItem.analyzed: False,
+                        },
+                        synchronize_session=False,
+                    )
                     updated_count += 1
 
             source.last_sync_at = now

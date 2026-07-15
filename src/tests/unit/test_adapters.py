@@ -30,6 +30,32 @@ def test_local_folder_missing_path(tmp_path):
     assert not status.ok
 
 
+def test_local_folder_incremental_and_backfill(tmp_path):
+    """已索引且未变更的文件跳过；新文件回补；顺序确定。"""
+    from datetime import datetime, timezone
+
+    from app.backend.services.info_source.local_folder import LocalFolderAdapter
+
+    (tmp_path / "a.txt").write_text("A", encoding="utf-8")
+    (tmp_path / "b.txt").write_text("B", encoding="utf-8")
+    adapter = LocalFolderAdapter({"folder_path": str(tmp_path), "patterns": ["*.txt"]})
+
+    # 首次同步：全部
+    first = adapter.fetch_new_items()
+    assert {it.title for it in first} == {"a.txt", "b.txt"}
+
+    known = {it.external_id for it in first}
+    since = datetime.now(timezone.utc)
+
+    # 已知且未变更 -> 0
+    assert adapter.fetch_new_items(since=since, known_ids=known) == []
+
+    # 新文件回补（不在 known，无论 mtime）
+    (tmp_path / "c.txt").write_text("C", encoding="utf-8")
+    second = adapter.fetch_new_items(since=since, known_ids=known)
+    assert [it.title for it in second] == ["c.txt"]
+
+
 def test_website_adapter_with_mock_client():
     from app.backend.services.info_source.website import WebsiteAdapter
 
