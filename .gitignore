@@ -1,0 +1,38 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+.venv/
+env/
+ENV/
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# 日志目录（CLAUDE.md 要求 .gitignore 必须包含 logs）
+logs/
+*.log
+*.pid
+
+# 前端
+node_modules/
+dist/
+.vite/
+*.local
+
+# 编辑器/系统
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# 注意：data 目录本身不纳入忽略（CLAUDE.md 要求 .gitignore 不能包含 data 目录）。
+# 仅忽略 data 下的运行时产物（数据库二进制、抓取下载的原始文件、凭证文件）。
+# 用 **/ 前缀以匹配 src/data/ 等任意层级：
+**/data/app.sqlite3
+**/data/downloads/
+**/data/password.txt

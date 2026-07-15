@@ -1,0 +1,3 @@
+# 此文件用于在 git 中保留 data 目录结构。
+# data/password.txt 由 start 脚本在首次部署时创建（默认内容见 CLAUDE.md 附件）。
+# data/app.sqlite3 与 data/downloads/ 为运行时产物，已在 .gitignore 中忽略。

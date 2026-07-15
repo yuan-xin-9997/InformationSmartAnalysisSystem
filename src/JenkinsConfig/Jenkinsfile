@@ -1,0 +1,101 @@
+// 信息智能分析系统 Jenkins 流水线
+// 参照《生成Jenkinsfile的提示词.md》
+//
+// Jenkins 任务配置：
+//   - 流水线类型：Pipeline script from SCM
+//   - 脚本路径：src/JenkinsConfig/Jenkinsfile
+//   - 远程仓库：SSH 形式（如 git@github.com:<owner>/InformationSmartAnalysisSystem.git）
+//   - 凭据：使用已配置的 SSH 凭据
+//   - 触发器：每 30 分钟轮询 GitHub 提交（SCM 轮询 H/30 * * * *）
+//
+// 部署路径由 DEPLOY_DIR 指定（默认 /opt/InformationSmartAnalysisSystem），
+// 请按实际部署位置调整。部署目录须为该仓库的一次 git clone。
+
+pipeline {
+    agent any
+
+    environment {
+        DEPLOY_DIR = '/opt/InformationSmartAnalysisSystem'
+    }
+
+    options {
+        timestamps()
+        timeout(time: 30, unit: 'MINUTES')
+    }
+
+    stages {
+        stage('停止当前服务') {
+            steps {
+                sh """
+                    if [ -d "${DEPLOY_DIR}/src" ]; then
+                      cd "${DEPLOY_DIR}/src" && bash stop.sh || true
+                    fi
+                """
+            }
+        }
+
+        stage('拉取最新代码到部署路径') {
+            steps {
+                sh """
+                    if [ ! -d "${DEPLOY_DIR}/.git" ]; then
+                        echo "错误：${DEPLOY_DIR} 不是 git 仓库，请先在该路径 clone 本项目"
+                        exit 1
+                    fi
+                    cd "${DEPLOY_DIR}"
+                    git fetch --all
+                    git reset --hard origin/\$(git rev-parse --abbrev-ref HEAD)
+                """
+            }
+        }
+
+        stage('安装依赖与构建前端') {
+            steps {
+                sh """
+                    cd "${DEPLOY_DIR}/src"
+                    # 创建/复用虚拟环境并安装后端依赖
+                    if [ ! -x ".venv/bin/python" ]; then
+                        python3 -m venv .venv
+                    fi
+                    .venv/bin/python -m pip install --upgrade pip -q
+                    .venv/bin/python -m pip install -r app/backend/requirements.txt -q
+                    # 构建前端
+                    if command -v npm >/dev/null 2>&1; then
+                        cd app/frontend
+                        npm install --no-audit --no-fund
+                        npm run build
+                    else
+                        echo "警告：未安装 npm，跳过前端构建（仅提供后端 API）"
+                    fi
+                """
+            }
+        }
+
+        stage('启动服务') {
+            steps {
+                sh """
+                    cd "${DEPLOY_DIR}/src"
+                    bash start.sh
+                """
+            }
+        }
+
+        stage('健康检查') {
+            steps {
+                sh """
+                    cd "${DEPLOY_DIR}/src"
+                    sleep 3
+                    bash status.sh
+                """
+            }
+        }
+    }
+
+    post {
+        failure {
+            echo '部署失败，请检查上方日志'
+        }
+        success {
+            echo "部署成功，访问 http://192.168.0.111:8000 验证"
+        }
+    }
+}

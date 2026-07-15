@@ -1,0 +1,42 @@
+{
+  "server": {
+    "host": "0.0.0.0",
+    "port": 8000
+  },
+  "database": {
+    "path": "data/app.sqlite3"
+  },
+  "auth": {
+    "secret_key": "请替换为足够长的随机字符串(ISAS_AUTH_SECRET_KEY 可覆盖)",
+    "token_expire_minutes": 720,
+    "password_file": "data/password.txt"
+  },
+  "web_fetch": {
+    "base_url": "http://192.168.0.111:33333",
+    "api_key": "966f9d9f573e6efcb889b5fe9bfe48b6c528e4a08ebddc3ffcbd5c49406a9fa9",
+    "timeout_seconds": 30
+  },
+  "llm": {
+    "base_url": "https://api.openai.com/v1",
+    "api_key": "sk-请替换为真实Key",
+    "model": "gpt-4o-mini",
+    "temperature": 0.3,
+    "max_tokens": 2000,
+    "timeout_seconds": 60
+  },
+  "freshrss": {
+    "default_base_url": "",
+    "default_user": "",
+    "default_api_token": ""
+  },
+  "logging": {
+    "level": "INFO",
+    "dir": "logs",
+    "retention_days": 30
+  },
+  "data_dir": "data",
+  "timezone_display": "Asia/Shanghai",
+  "worker": {
+    "max_workers": 4
+  }
+}
