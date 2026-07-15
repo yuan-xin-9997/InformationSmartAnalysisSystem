@@ -5,6 +5,12 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
+# 部署目录属主（如 jenkins）才有写权限；若以其他用户运行，自动 sudo 到属主再执行。
+OWNER=$(stat -c %U "$SCRIPT_DIR" 2>/dev/null || true)
+if [ -z "${ISAS_NO_SUDO:-}" ] && [ -n "$OWNER" ] && [ "$(id -un)" != "$OWNER" ] && [ "$(id -un)" != "root" ] && command -v sudo >/dev/null 2>&1; then
+  exec sudo -u "$OWNER" ISAS_NO_SUDO=1 bash "$0" "$@"
+fi
+
 VENV="${ISAS_VENV:-$SCRIPT_DIR/.venv}"
 PYTHON="$VENV/bin/python"
 LOG_DIR="$SCRIPT_DIR/logs"

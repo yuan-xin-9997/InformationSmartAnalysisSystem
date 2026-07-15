@@ -104,6 +104,8 @@ sudo systemctl status isas
 
 Linux 亦可使用 `systemctl start/stop/status/restart isas`。
 
+> **关于运行用户**：Jenkins 部署的目录属主为 `jenkins`，因此 `logs/`、`data/` 只有 `jenkins` 可写。Linux 脚本（`start.sh`/`stop.sh`/`status.sh`）在以非属主用户运行时会**自动 `sudo` 到部署目录属主**再执行（需该用户对 `sudo` 免密），故直接 `bash start.sh` 即可；若自动提权不可用，可手动 `sudo -u jenkins bash start.sh`。Windows 下 `start.ps1` 以当前用户运行，无此问题。
+
 日志按天切割于 `logs/`：当天为 `logs/app.log`，历史为 `logs/app.YYYY-MM-DD.log`；服务 PID 记录于 `logs/server.pid`。日志时间为北京时间。
 
 下载的原始抓取文件按 `年/月/日` 存放于 `data/downloads/`。

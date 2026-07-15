@@ -4,6 +4,11 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PID_FILE="$SCRIPT_DIR/logs/server.pid"
+# 部署目录属主（如 jenkins）才有写权限；若以其他用户运行，自动 sudo 到属主再执行。
+OWNER=$(stat -c %U "$SCRIPT_DIR" 2>/dev/null || true)
+if [ -z "${ISAS_NO_SUDO:-}" ] && [ -n "$OWNER" ] && [ "$(id -un)" != "$OWNER" ] && [ "$(id -un)" != "root" ] && command -v sudo >/dev/null 2>&1; then
+  exec sudo -u "$OWNER" ISAS_NO_SUDO=1 bash "$0" "$@"
+fi
 # 端口优先取 ISAS_SERVER_PORT 环境变量；否则读 config/app.json；均失败回落 28080
 if [ -z "${ISAS_SERVER_PORT:-}" ]; then
   ISAS_SERVER_PORT=$(python3 -c "import json;print(json.load(open('$SCRIPT_DIR/config/app.json'))['server']['port'])" 2>/dev/null || echo 28080)
