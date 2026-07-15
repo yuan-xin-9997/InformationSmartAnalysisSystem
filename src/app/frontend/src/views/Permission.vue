@@ -1,52 +1,57 @@
 <template>
   <div>
     <div class="toolbar">
-      <el-button @click="load">刷新</el-button>
+      <div class="stats"><strong>{{ users.length }}</strong><span>个系统用户</span></div>
+      <button @click="load">刷新</button>
     </div>
-    <el-table :data="users" stripe>
-      <el-table-column prop="id" label="ID" width="60" />
-      <el-table-column prop="username" label="用户名" />
-      <el-table-column label="角色" width="120">
-        <template #default="{ row }">
-          <el-tag :type="row.role === 'admin' ? 'danger' : ''">{{ row.role === 'admin' ? '管理员' : '普通用户' }}</el-tag>
-        </template>
-      </el-table-column>
-      <el-table-column label="创建时间" width="180">
-        <template #default="{ row }">{{ row.created_at }}</template>
-      </el-table-column>
-      <el-table-column label="操作" width="160">
-        <template #default="{ row }">
-          <el-button size="small" :disabled="row.role === 'admin'" @click="openConfig(row)">配置权限</el-button>
-        </template>
-      </el-table-column>
-    </el-table>
-    <div class="hint">用户与角色来源于 data/password.txt，修改该文件后下次登录自动同步。管理员默认拥有全部页面权限。</div>
+    <div class="panel">
+      <table>
+        <thead>
+          <tr><th>用户</th><th>角色</th><th>可访问页面</th><th>创建时间</th><th></th></tr>
+        </thead>
+        <tbody>
+          <tr v-for="u in users" :key="u.id">
+            <td><strong>{{ u.username }}</strong></td>
+            <td><span :class="['pill', u.role === 'admin' ? 'error' : '']">{{ u.role === 'admin' ? '管理员' : '普通用户' }}</span></td>
+            <td><div class="tags"><span v-for="p in pageKeys(u)" :key="p">{{ pageLabel(p) }}</span></div></td>
+            <td>{{ u.created_at }}</td>
+            <td>
+              <div class="actions">
+                <button :disabled="u.role === 'admin'" @click="openConfig(u)">配置权限</button>
+              </div>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="muted" style="margin-top:12px;font-size:12px">用户与角色来源于 data/password.txt，修改后下次登录自动同步。管理员默认拥有全部页面权限。</p>
 
-    <el-dialog v-model="dialogVisible" :title="`配置权限 - ${currentUser?.username}`" width="560px">
-      <el-checkbox-group v-model="selected">
-        <div v-for="p in pages" :key="p.key" class="perm-item">
-          <el-checkbox :label="p.key" :disabled="!p.grantable">{{ p.label }}（{{ p.key }}）</el-checkbox>
+    <div v-if="dialogVisible" class="modal" @click.self="dialogVisible = false">
+      <form class="modal-card" @submit.prevent="onSave">
+        <div class="modal-head">
+          <div><p class="eyebrow">ACCESS CONTROL</p><h2>配置权限 - {{ currentUser?.username }}</h2></div>
+          <button type="button" @click="dialogVisible = false">×</button>
         </div>
-      </el-checkbox-group>
-      <template #footer>
-        <el-button @click="dialogVisible = false">取消</el-button>
-        <el-button type="primary" @click="onSave">保存</el-button>
-      </template>
-    </el-dialog>
+        <fieldset>
+          <legend>可访问页面</legend>
+          <label v-for="p in pages" :key="p.key" class="check">
+            <input type="checkbox" :disabled="!p.grantable" :checked="selected.includes(p.key)" @change="toggle(p.key)" />
+            {{ p.label }}（{{ p.key }}）
+          </label>
+        </fieldset>
+        <div class="modal-actions">
+          <button type="button" @click="dialogVisible = false">取消</button>
+          <button class="primary">保存</button>
+        </div>
+      </form>
+    </div>
   </div>
 </template>
 
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
-import { ElMessage } from 'element-plus'
-import {
-  listUsersApi,
-  listPagesApi,
-  getPermissionsApi,
-  setPermissionsApi,
-  type UserOut,
-  type PageDefinition,
-} from '@/api/users'
+import { showToast } from '@/composables/toast'
+import { listUsersApi, listPagesApi, getPermissionsApi, setPermissionsApi, type UserOut, type PageDefinition } from '@/api/users'
 
 const users = ref<UserOut[]>([])
 const pages = ref<PageDefinition[]>([])
@@ -63,30 +68,31 @@ async function load() {
   users.value = await listUsersApi()
 }
 
-async function openConfig(row: UserOut) {
-  currentUser.value = row
-  selected.value = await getPermissionsApi(row.id)
-  dialogVisible.value = true
+function pageLabel(key: string) {
+  const map: Record<string, string> = {
+    dashboard: '概览', info_sources: '信息源', analysis_tasks: '分析任务',
+    analysis_result: '分析结果', task_center: '任务中心', permission: '权限管理', system_config: '系统配置',
+  }
+  return map[key] || key
+}
+function pageKeys(u: UserOut) {
+  return u.role === 'admin' ? pages.value.map((p) => p.key) : []
 }
 
+async function openConfig(u: UserOut) {
+  currentUser.value = u
+  selected.value = await getPermissionsApi(u.id)
+  dialogVisible.value = true
+}
+function toggle(key: string) {
+  selected.value = selected.value.includes(key)
+    ? selected.value.filter((k) => k !== key)
+    : [...selected.value, key]
+}
 async function onSave() {
   if (!currentUser.value) return
   await setPermissionsApi(currentUser.value.id, selected.value)
-  ElMessage.success('已保存')
+  showToast('已保存')
   dialogVisible.value = false
 }
 </script>
-
-<style scoped>
-.toolbar {
-  margin-bottom: 12px;
-}
-.perm-item {
-  margin: 6px 0;
-}
-.hint {
-  margin-top: 12px;
-  color: #909399;
-  font-size: 12px;
-}
-</style>

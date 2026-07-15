@@ -1,55 +1,51 @@
 <template>
-  <div class="dashboard">
-    <el-row :gutter="16">
-      <el-col :span="8">
-        <el-card>
-          <div class="stat-num">{{ sources.length }}</div>
-          <div class="stat-label">信息源</div>
-        </el-card>
-      </el-col>
-      <el-col :span="8">
-        <el-card>
-          <div class="stat-num">{{ tasks.length }}</div>
-          <div class="stat-label">分析任务</div>
-        </el-card>
-      </el-col>
-      <el-col :span="8">
-        <el-card>
-          <div class="stat-num">{{ runs.length }}</div>
-          <div class="stat-label">最近任务运行</div>
-        </el-card>
-      </el-col>
-    </el-row>
+  <div>
+    <div class="item-list" style="grid-template-columns:1fr 1fr 1fr;gap:14px">
+      <div class="item-card" style="cursor:default">
+        <div class="file-icon">源</div>
+        <div class="grow">
+          <div class="item-title"><h3>信息源</h3></div>
+          <div class="stats"><strong>{{ sources.length }}</strong><span>个</span></div>
+        </div>
+      </div>
+      <div class="item-card" style="cursor:default">
+        <div class="file-icon">析</div>
+        <div class="grow">
+          <div class="item-title"><h3>分析任务</h3></div>
+          <div class="stats"><strong>{{ tasks.length }}</strong><span>个</span></div>
+        </div>
+      </div>
+      <div class="item-card" style="cursor:default">
+        <div class="file-icon">务</div>
+        <div class="grow">
+          <div class="item-title"><h3>最近运行</h3></div>
+          <div class="stats"><strong>{{ runs.length }}</strong><span>条</span></div>
+        </div>
+      </div>
+    </div>
 
-    <el-card class="recent">
-      <template #header>最近任务运行</template>
-      <el-table :data="runs.slice(0, 10)" size="small" stripe>
-        <el-table-column prop="id" label="ID" width="70" />
-        <el-table-column label="类型">
-          <template #default="{ row }">{{ kindLabel(row.kind) }}</template>
-        </el-table-column>
-        <el-table-column prop="ref_name" label="名称" />
-        <el-table-column label="状态" width="100">
-          <template #default="{ row }">
-            <el-tag :type="statusType(row.status)" size="small">{{ row.status }}</el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column prop="summary" label="摘要" show-overflow-tooltip />
-        <el-table-column label="开始时间" width="180">
-          <template #default="{ row }">{{ row.started_at || '-' }}</template>
-        </el-table-column>
-      </el-table>
-    </el-card>
+    <div class="panel" style="margin-top:18px">
+      <div class="panel-head"><h2>最近任务运行</h2><span>{{ runs.length }}</span></div>
+      <div v-if="!runs.length" class="empty compact">暂无运行记录</div>
+      <div v-for="run in runs" :key="run.id" class="log-row">
+        <span :class="['status-dot', run.status]"></span>
+        <div>
+          <strong>{{ kindLabel(run.kind) }} · {{ run.ref_name || '-' }}</strong>
+          <p>{{ run.summary || run.error || run.status }}</p>
+        </div>
+        <time>{{ run.started_at || run.created_at }}</time>
+      </div>
+    </div>
   </div>
 </template>
 
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
 import { listSourcesApi, type InfoSource } from '@/api/sources'
-import { listTasksApi, listRunsApi, type AnalysisTask, type TaskRun } from '@/api/tasks'
+import { listTasksApi, listRunsApi, type AnalysisTaskDetail, type TaskRun } from '@/api/tasks'
 
 const sources = ref<InfoSource[]>([])
-const tasks = ref<AnalysisTask[]>([])
+const tasks = ref<AnalysisTaskDetail[]>([])
 const runs = ref<TaskRun[]>([])
 
 onMounted(async () => {
@@ -63,27 +59,4 @@ onMounted(async () => {
 function kindLabel(k: string) {
   return k === 'analysis' ? '分析' : k === 'sync' ? '同步' : k
 }
-function statusType(s: string) {
-  if (s === 'succeeded') return 'success'
-  if (s === 'failed') return 'danger'
-  if (s === 'running') return 'warning'
-  return 'info'
-}
 </script>
-
-<style scoped>
-.stat-num {
-  font-size: 32px;
-  font-weight: 700;
-  color: #409eff;
-  text-align: center;
-}
-.stat-label {
-  text-align: center;
-  color: #909399;
-  margin-top: 6px;
-}
-.recent {
-  margin-top: 16px;
-}
-</style>

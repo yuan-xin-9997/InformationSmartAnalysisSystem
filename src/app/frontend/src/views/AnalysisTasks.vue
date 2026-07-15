@@ -1,102 +1,106 @@
 <template>
   <div>
     <div class="toolbar">
-      <el-button type="primary" @click="openCreate">新建分析任务</el-button>
-      <el-button @click="load">刷新</el-button>
+      <div class="stats"><strong>{{ tasks.length }}</strong><span>个分析任务</span></div>
+      <div class="button-row">
+        <button @click="load">刷新</button>
+        <button class="primary" @click="openCreate">＋ 新建分析任务</button>
+      </div>
     </div>
-    <el-table :data="tasks" stripe>
-      <el-table-column prop="id" label="ID" width="60" />
-      <el-table-column prop="name" label="名称" />
-      <el-table-column label="分析模式" width="110">
-        <template #default="{ row }">{{ modeLabel(row.config?.mode) }}</template>
-      </el-table-column>
-      <el-table-column label="绑定源" width="80">
-        <template #default="{ row }">{{ row.sources?.length ?? 0 }}</template>
-      </el-table-column>
-      <el-table-column prop="description" label="说明" show-overflow-tooltip />
-      <el-table-column label="操作" width="420" fixed="right">
-        <template #default="{ row }">
-          <el-button size="small" @click="openDetail(row)">源状态</el-button>
-          <el-dropdown size="small" @command="(c: string) => onRun(row.id, c as 'full'|'incremental')">
-            <el-button size="small" type="primary">运行分析<el-icon class="el-icon--right"><ArrowDown /></el-icon></el-button>
-            <template #dropdown>
-              <el-dropdown-menu>
-                <el-dropdown-item command="incremental">增量分析</el-dropdown-item>
-                <el-dropdown-item command="full">全量分析</el-dropdown-item>
-              </el-dropdown-menu>
-            </template>
-          </el-dropdown>
-          <el-button size="small" @click="goResults(row.id)">结果</el-button>
-          <el-button size="small" @click="openEdit(row)">编辑</el-button>
-          <el-button size="small" type="danger" @click="onDelete(row)">删除</el-button>
-        </template>
-      </el-table-column>
-    </el-table>
 
-    <el-dialog v-model="dialogVisible" :title="editing ? '编辑分析任务' : '新建分析任务'" width="640px">
-      <el-form :model="form" label-width="100px">
-        <el-form-item label="名称">
-          <el-input v-model="form.name" />
-        </el-form-item>
-        <el-form-item label="说明">
-          <el-input v-model="form.description" type="textarea" :rows="2" />
-        </el-form-item>
-        <el-form-item label="分析模式">
-          <el-select v-model="form.mode" style="width: 100%">
-            <el-option label="逐条分析(per_item)" value="per_item" />
-            <el-option label="汇总分析(aggregate)" value="aggregate" />
-          </el-select>
-        </el-form-item>
-        <el-form-item label="绑定信息源">
-          <el-select v-model="form.source_ids" multiple style="width: 100%" placeholder="选择信息源">
-            <el-option v-for="s in allSources" :key="s.id" :label="s.name" :value="s.id" />
-          </el-select>
-        </el-form-item>
-        <el-form-item label="高级配置">
-          <el-input v-model="configText" type="textarea" :rows="4" placeholder='可留空，默认逐条分析。例如 {"mode":"per_item","max_items_per_source":50}' />
-        </el-form-item>
-      </el-form>
-      <template #footer>
-        <el-button @click="dialogVisible = false">取消</el-button>
-        <el-button type="primary" @click="onSave">保存</el-button>
-      </template>
-    </el-dialog>
+    <div v-if="!tasks.length" class="empty">
+      <b>还没有分析任务</b><span>新建任务并绑定信息源，即可触发智能分析。</span>
+    </div>
+    <div v-else class="item-list">
+      <article v-for="t in tasks" :key="t.id" class="item-card">
+        <div class="file-icon">析</div>
+        <div class="grow">
+          <div class="item-title">
+            <h3>{{ t.name }}</h3>
+            <span class="pill">{{ modeLabel(t.config?.mode as string | undefined) }}</span>
+          </div>
+          <p>{{ t.description || '无说明' }}</p>
+          <div class="meta">
+            <span>绑定 {{ t.sources.length }} 个源</span>
+            <span>创建于 {{ t.created_at }}</span>
+          </div>
+        </div>
+        <div class="actions">
+          <button @click="openDetail(t)">源状态</button>
+          <button class="accent" @click="onRun(t.id, 'incremental')">增量</button>
+          <button @click="onRun(t.id, 'full')">全量</button>
+          <button @click="goResults(t.id)">结果</button>
+          <button @click="openEdit(t)">编辑</button>
+          <button class="danger" @click="onDelete(t)">删除</button>
+        </div>
+      </article>
+    </div>
 
-    <el-dialog v-model="detailVisible" title="信息源状态" width="720px">
-      <el-table :data="detailSources" size="small" stripe>
-        <el-table-column prop="source_name" label="信息源" />
-        <el-table-column label="状态" width="90">
-          <template #default="{ row }">
-            <el-tag :type="statusType(row.source_status)" size="small">{{ row.source_status }}</el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column prop="item_count" label="条目数" width="80" />
-        <el-table-column label="水位线(item_id)" width="120">
-          <template #default="{ row }">{{ row.last_analyzed_item_id ?? '-' }}</template>
-        </el-table-column>
-        <el-table-column label="最近分析时间">
-          <template #default="{ row }">{{ row.last_analyzed_at || '-' }}</template>
-        </el-table-column>
-      </el-table>
-    </el-dialog>
+    <div v-if="dialogVisible" class="modal" @click.self="dialogVisible = false">
+      <form class="modal-card large" @submit.prevent="onSave">
+        <div class="modal-head">
+          <div><p class="eyebrow">ANALYSIS TASK</p><h2>{{ editing ? '编辑分析任务' : '新建分析任务' }}</h2></div>
+          <button type="button" @click="dialogVisible = false">×</button>
+        </div>
+        <div class="form-grid">
+          <label>名称<input v-model.trim="form.name" required /></label>
+          <label>分析模式
+            <select v-model="form.mode">
+              <option value="per_item">逐条分析（per_item）</option>
+              <option value="aggregate">汇总分析（aggregate）</option>
+            </select>
+          </label>
+        </div>
+        <label>说明<input v-model.trim="form.description" placeholder="可选" /></label>
+        <fieldset>
+          <legend>绑定信息源</legend>
+          <label v-for="s in allSources" :key="s.id" class="check">
+            <input type="checkbox" :value="s.id" v-model="form.source_ids" /> {{ s.name }}（{{ typeLabel(s.type) }}）
+          </label>
+          <p v-if="!allSources.length" class="muted">暂无信息源，请先在「信息源管理」添加。</p>
+        </fieldset>
+        <label>高级配置（JSON，可留空）
+          <textarea v-model="configText" rows="4" placeholder='例如 {"max_items_per_source":50,"system_prompt":""}'></textarea>
+        </label>
+        <div class="modal-actions">
+          <button type="button" @click="dialogVisible = false">取消</button>
+          <button class="primary">保存</button>
+        </div>
+      </form>
+    </div>
+
+    <div v-if="detailVisible" class="modal" @click.self="detailVisible = false">
+      <div class="modal-card large">
+        <div class="modal-head">
+          <div><p class="eyebrow">SOURCE STATUS</p><h2>信息源状态</h2></div>
+          <button type="button" @click="detailVisible = false">×</button>
+        </div>
+        <div v-if="!detailSources.length" class="empty compact">未绑定信息源</div>
+        <table v-else>
+          <thead><tr><th>信息源</th><th>状态</th><th>条目数</th><th>水位线</th><th>最近分析</th></tr></thead>
+          <tbody>
+            <tr v-for="s in detailSources" :key="s.source_id">
+              <td><strong>{{ s.source_name }}</strong></td>
+              <td><span :class="['pill', s.source_status]">{{ s.source_status }}</span></td>
+              <td>{{ s.item_count }}</td>
+              <td>{{ s.last_analyzed_item_id ?? '-' }}</td>
+              <td>{{ s.last_analyzed_at || '从未' }}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
   </div>
 </template>
 
 <script setup lang="ts">
 import { onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { ElMessage, ElMessageBox } from 'element-plus'
-import { ArrowDown } from '@element-plus/icons-vue'
+import { showToast } from '@/composables/toast'
 import { listSourcesApi, type InfoSource } from '@/api/sources'
 import {
-  listTasksApi,
-  createTaskApi,
-  updateTaskApi,
-  deleteTaskApi,
-  runTaskApi,
-  getTaskApi,
-  type AnalysisTaskDetail,
-  type TaskSourceOut,
+  listTasksApi, createTaskApi, updateTaskApi, deleteTaskApi, runTaskApi, getTaskApi,
+  type AnalysisTaskDetail, type TaskSourceOut,
 } from '@/api/tasks'
 
 const router = useRouter()
@@ -121,10 +125,8 @@ async function load() {
 function modeLabel(m?: string) {
   return m === 'aggregate' ? '汇总分析' : '逐条分析'
 }
-function statusType(s: string) {
-  if (s === 'ok') return 'success'
-  if (s === 'error') return 'danger'
-  return 'warning'
+function typeLabel(t: string) {
+  return { website: '官方网站', local_folder: '本地文件夹', freshrss: 'FreshRSS' }[t] || t
 }
 
 function openCreate() {
@@ -136,14 +138,13 @@ function openCreate() {
   configText.value = ''
   dialogVisible.value = true
 }
-
-function openEdit(row: AnalysisTaskDetail) {
-  editing.value = row
-  form.name = row.name
-  form.description = row.description
-  form.mode = (row.config?.mode as string) || 'per_item'
-  form.source_ids = row.sources.map((s) => s.source_id)
-  configText.value = JSON.stringify(row.config || {}, null, 2)
+function openEdit(t: AnalysisTaskDetail) {
+  editing.value = t
+  form.name = t.name
+  form.description = t.description
+  form.mode = (t.config?.mode as string) || 'per_item'
+  form.source_ids = t.sources.map((s) => s.source_id)
+  configText.value = JSON.stringify(t.config || {}, null, 2)
   dialogVisible.value = true
 }
 
@@ -153,7 +154,7 @@ async function onSave() {
     try {
       config = JSON.parse(configText.value)
     } catch {
-      ElMessage.error('高级配置不是合法的 JSON')
+      showToast('高级配置不是合法的 JSON')
       return
     }
   }
@@ -161,20 +162,12 @@ async function onSave() {
   try {
     if (editing.value) {
       await updateTaskApi(editing.value.id, {
-        name: form.name,
-        description: form.description,
-        config,
-        source_ids: form.source_ids,
+        name: form.name, description: form.description, config, source_ids: form.source_ids,
       })
     } else {
-      await createTaskApi({
-        name: form.name,
-        description: form.description,
-        config,
-        source_ids: form.source_ids,
-      })
+      await createTaskApi({ name: form.name, description: form.description, config, source_ids: form.source_ids })
     }
-    ElMessage.success('保存成功')
+    showToast('保存成功')
     dialogVisible.value = false
     await load()
   } catch {
@@ -182,20 +175,20 @@ async function onSave() {
   }
 }
 
-async function onDelete(row: AnalysisTaskDetail) {
-  await ElMessageBox.confirm(`确认删除分析任务「${row.name}」？`, '提示', { type: 'warning' })
-  await deleteTaskApi(row.id)
-  ElMessage.success('已删除')
+async function onDelete(t: AnalysisTaskDetail) {
+  if (!confirm(`确认删除分析任务「${t.name}」？`)) return
+  await deleteTaskApi(t.id)
+  showToast('已删除')
   await load()
 }
 
 async function onRun(id: number, mode: 'full' | 'incremental') {
   const { run_id } = await runTaskApi(id, mode)
-  ElMessage.success(`已提交${mode === 'full' ? '全量' : '增量'}分析，运行 ID: ${run_id}`)
+  showToast(`已提交${mode === 'full' ? '全量' : '增量'}分析，运行 ID: ${run_id}`)
 }
 
-async function openDetail(row: AnalysisTaskDetail) {
-  const detail = await getTaskApi(row.id)
+async function openDetail(t: AnalysisTaskDetail) {
+  const detail = await getTaskApi(t.id)
   detailSources.value = detail.sources
   detailVisible.value = true
 }
@@ -204,11 +197,3 @@ function goResults(taskId: number) {
   router.push({ path: '/analysis-result', query: { task_id: taskId } })
 }
 </script>
-
-<style scoped>
-.toolbar {
-  margin-bottom: 12px;
-  display: flex;
-  gap: 8px;
-}
-</style>

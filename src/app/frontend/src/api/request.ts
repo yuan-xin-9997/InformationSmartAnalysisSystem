@@ -1,8 +1,7 @@
 import axios, { type AxiosResponse } from 'axios'
-import { ElMessage } from 'element-plus'
+import { showToast } from '@/composables/toast'
 
-// The response interceptor unwraps `resp.data`, so request methods return the
-// payload directly. The second generic of each method is therefore the payload type.
+// 响应拦截器解包 resp.data，故请求方法直接返回业务数据。
 const request = axios.create({
   baseURL: '',
   timeout: 60000,
@@ -27,9 +26,8 @@ request.interceptors.response.use(
         window.location.href = '/login'
       }
     } else if (status !== 403) {
-      // 403 is handled by the caller (page-level permission feedback); other
-      // errors surface a toast here.
-      ElMessage.error(typeof detail === 'string' ? detail : '请求失败')
+      // 403 由页面层处理（页面级权限反馈），其余错误弹吐司。
+      showToast(typeof detail === 'string' ? detail : '请求失败')
     }
     return Promise.reject(error)
   },

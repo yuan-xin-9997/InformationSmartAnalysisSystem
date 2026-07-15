@@ -1,38 +1,40 @@
 <template>
   <div>
     <div class="toolbar">
-      <el-select v-model="taskId" placeholder="按任务筛选" clearable style="width: 220px" @change="load">
-        <el-option v-for="t in tasks" :key="t.id" :label="t.name" :value="t.id" />
-      </el-select>
-      <el-button @click="load">刷新</el-button>
+      <div class="button-row">
+        <select v-model="taskId" @change="load" style="width:auto">
+          <option :value="undefined">全部任务</option>
+          <option v-for="t in tasks" :key="t.id" :value="t.id">{{ t.name }}</option>
+        </select>
+        <button @click="load">刷新</button>
+      </div>
+      <div class="stats"><strong>{{ results.length }}</strong><span>条结果</span></div>
     </div>
-    <el-table :data="results" stripe>
-      <el-table-column prop="id" label="ID" width="60" />
-      <el-table-column label="类型" width="100">
-        <template #default="{ row }">
-          <el-tag size="small" :type="row.result_type === 'aggregate' ? 'warning' : ''">
-            {{ row.result_type === 'aggregate' ? '汇总' : '逐条' }}
-          </el-tag>
-        </template>
-      </el-table-column>
-      <el-table-column prop="source_name" label="信息源" width="140" />
-      <el-table-column label="信息项" width="90">
-        <template #default="{ row }">{{ row.info_item_id ?? '-' }}</template>
-      </el-table-column>
-      <el-table-column prop="content" label="分析内容" show-overflow-tooltip />
-      <el-table-column label="生成时间" width="180">
-        <template #default="{ row }">{{ row.created_at }}</template>
-      </el-table-column>
-      <el-table-column label="操作" width="80" fixed="right">
-        <template #default="{ row }">
-          <el-button size="small" link @click="openContent(row)">查看</el-button>
-        </template>
-      </el-table-column>
-    </el-table>
 
-    <el-dialog v-model="contentVisible" title="分析内容" width="720px">
-      <pre class="content-pre">{{ currentContent }}</pre>
-    </el-dialog>
+    <div v-if="!results.length" class="empty"><b>暂无分析结果</b><span>触发分析任务后将在此展示。</span></div>
+    <div v-else class="item-list">
+      <article v-for="r in results" :key="r.id" class="item-card" style="cursor:pointer" @click="openContent(r)">
+        <div class="file-icon">{{ r.result_type === 'aggregate' ? '总' : '条' }}</div>
+        <div class="grow">
+          <div class="item-title">
+            <h3>{{ r.source_name || '未知源' }}</h3>
+            <span :class="['pill', r.result_type === 'aggregate' ? 'warning' : 'ok']">{{ r.result_type === 'aggregate' ? '汇总' : '逐条' }}</span>
+          </div>
+          <p>{{ r.content.slice(0, 120) }}</p>
+          <div class="meta"><span>{{ r.created_at }}</span></div>
+        </div>
+      </article>
+    </div>
+
+    <div v-if="contentVisible" class="modal" @click.self="contentVisible = false">
+      <div class="modal-card large">
+        <div class="modal-head">
+          <div><p class="eyebrow">ANALYSIS</p><h2>分析内容</h2></div>
+          <button type="button" @click="contentVisible = false">×</button>
+        </div>
+        <pre class="content-pre">{{ currentContent }}</pre>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -40,11 +42,8 @@
 import { onMounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import {
-  listTasksApi,
-  listAllResultsApi,
-  listTaskResultsApi,
-  type AnalysisTask,
-  type AnalysisResult,
+  listTasksApi, listAllResultsApi, listTaskResultsApi,
+  type AnalysisTask, type AnalysisResult,
 } from '@/api/tasks'
 
 const route = useRoute()
@@ -73,26 +72,8 @@ async function load() {
   }
 }
 
-function openContent(row: AnalysisResult) {
-  currentContent.value = row.content
+function openContent(r: AnalysisResult) {
+  currentContent.value = r.content
   contentVisible.value = true
 }
 </script>
-
-<style scoped>
-.toolbar {
-  margin-bottom: 12px;
-  display: flex;
-  gap: 8px;
-}
-.content-pre {
-  white-space: pre-wrap;
-  word-break: break-word;
-  background: #f5f7fa;
-  padding: 12px;
-  border-radius: 4px;
-  max-height: 60vh;
-  overflow: auto;
-  font-family: inherit;
-}
-</style>

@@ -1,88 +1,97 @@
 <template>
   <div>
     <div class="toolbar">
-      <el-button type="primary" @click="openCreate">新增信息源</el-button>
-      <el-button @click="load">刷新</el-button>
+      <div class="stats"><strong>{{ sources.length }}</strong><span>个信息源</span></div>
+      <div class="button-row">
+        <button @click="load">刷新</button>
+        <button class="primary" @click="openCreate">＋ 添加信息源</button>
+      </div>
     </div>
-    <el-table :data="sources" stripe>
-      <el-table-column prop="id" label="ID" width="60" />
-      <el-table-column prop="name" label="名称" />
-      <el-table-column label="类型" width="120">
-        <template #default="{ row }">{{ typeLabel(row.type) }}</template>
-      </el-table-column>
-      <el-table-column label="状态" width="100">
-        <template #default="{ row }">
-          <el-tag :type="statusType(row.status)" size="small">{{ row.status }}</el-tag>
-        </template>
-      </el-table-column>
-      <el-table-column prop="item_count" label="条目数" width="90" />
-      <el-table-column label="最近同步" width="180">
-        <template #default="{ row }">{{ row.last_sync_at || '-' }}</template>
-      </el-table-column>
-      <el-table-column prop="last_error" label="最近错误" show-overflow-tooltip />
-      <el-table-column label="操作" width="360" fixed="right">
-        <template #default="{ row }">
-          <el-button size="small" @click="onCheck(row.id)">检查</el-button>
-          <el-button size="small" type="primary" @click="onSync(row.id)">同步</el-button>
-          <el-button size="small" @click="openItems(row)">条目</el-button>
-          <el-button size="small" @click="openEdit(row)">编辑</el-button>
-          <el-button size="small" type="danger" @click="onDelete(row)">删除</el-button>
-        </template>
-      </el-table-column>
-    </el-table>
 
-    <el-dialog v-model="dialogVisible" :title="editing ? '编辑信息源' : '新增信息源'" width="640px">
-      <el-form :model="form" label-width="100px">
-        <el-form-item label="名称">
-          <el-input v-model="form.name" />
-        </el-form-item>
-        <el-form-item label="类型">
-          <el-select v-model="form.type" :disabled="editing" style="width: 100%">
-            <el-option v-for="t in typeSpecs" :key="t.type" :label="typeLabel(t.type)" :value="t.type" />
-          </el-select>
-        </el-form-item>
-        <el-form-item label="配置(JSON)">
-          <el-input v-model="configText" type="textarea" :rows="8" placeholder="请输入 JSON 配置" />
-          <div class="hint">必填字段：{{ requiredHint }}</div>
-        </el-form-item>
-      </el-form>
-      <template #footer>
-        <el-button @click="dialogVisible = false">取消</el-button>
-        <el-button type="primary" @click="onSave">保存</el-button>
-      </template>
-    </el-dialog>
+    <div v-if="!sources.length" class="empty">
+      <b>还没有信息源</b><span>添加一个官方网站、本地文件夹或 FreshRSS 信息源。</span>
+    </div>
+    <div v-else class="item-list">
+      <article v-for="s in sources" :key="s.id" class="item-card">
+        <div class="file-icon">{{ typeIcon(s.type) }}</div>
+        <div class="grow">
+          <div class="item-title">
+            <h3>{{ s.name }}</h3>
+            <span :class="['pill', s.status]">{{ typeLabel(s.type) }} · {{ s.status }}</span>
+          </div>
+          <p>{{ describe(s) }}</p>
+          <div class="meta">
+            <span>{{ s.item_count }} 条</span>
+            <span>同步于 {{ s.last_sync_at || '从未' }}</span>
+            <span v-if="s.last_error" class="error">{{ s.last_error }}</span>
+          </div>
+        </div>
+        <div class="actions">
+          <button @click="onCheck(s.id)">检查</button>
+          <button class="accent" @click="onSync(s.id)">同步</button>
+          <button @click="openItems(s)">条目</button>
+          <button @click="openEdit(s)">编辑</button>
+          <button class="danger" @click="onDelete(s)">删除</button>
+        </div>
+      </article>
+    </div>
 
-    <el-dialog v-model="itemsVisible" :title="`条目 - ${currentSource?.name || ''}`" width="780px">
-      <el-table :data="items" size="small" stripe>
-        <el-table-column prop="title" label="标题" show-overflow-tooltip />
-        <el-table-column label="已分析" width="80">
-          <template #default="{ row }">
-            <el-tag size="small" :type="row.analyzed ? 'success' : 'info'">{{ row.analyzed ? '是' : '否' }}</el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column label="发布时间" width="170">
-          <template #default="{ row }">{{ row.published_at || '-' }}</template>
-        </el-table-column>
-      </el-table>
-    </el-dialog>
+    <div v-if="dialogVisible" class="modal" @click.self="dialogVisible = false">
+      <form class="modal-card large" @submit.prevent="onSave">
+        <div class="modal-head">
+          <div><p class="eyebrow">INFO SOURCE</p><h2>{{ editing ? '编辑信息源' : '添加信息源' }}</h2></div>
+          <button type="button" @click="dialogVisible = false">×</button>
+        </div>
+        <label>名称<input v-model.trim="form.name" required /></label>
+        <div class="form-grid">
+          <label>类型
+            <select v-model="form.type" :disabled="!!editing">
+              <option v-for="t in typeSpecs" :key="t.type" :value="t.type">{{ typeLabel(t.type) }}</option>
+            </select>
+          </label>
+          <label>必填字段
+            <input :value="requiredHint" disabled style="background:#f2f5fa" />
+          </label>
+        </div>
+        <label>配置（JSON）
+          <textarea v-model="configText" rows="9" placeholder="请输入 JSON 配置"></textarea>
+        </label>
+        <div class="modal-actions">
+          <button type="button" @click="dialogVisible = false">取消</button>
+          <button class="primary">保存</button>
+        </div>
+      </form>
+    </div>
+
+    <div v-if="itemsVisible" class="modal" @click.self="itemsVisible = false">
+      <div class="modal-card large">
+        <div class="modal-head">
+          <div><p class="eyebrow">ITEMS</p><h2>条目 - {{ currentSource?.name }}</h2></div>
+          <button type="button" @click="itemsVisible = false">×</button>
+        </div>
+        <div v-if="!items.length" class="empty compact">暂无条目，先执行同步</div>
+        <table v-else>
+          <thead><tr><th>标题</th><th>已分析</th><th>发布时间</th></tr></thead>
+          <tbody>
+            <tr v-for="it in items" :key="it.id">
+              <td>{{ it.title || '(无标题)' }}</td>
+              <td><span :class="['pill', it.analyzed ? 'ok' : '']">{{ it.analyzed ? '是' : '否' }}</span></td>
+              <td>{{ it.published_at || '-' }}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
   </div>
 </template>
 
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { showToast } from '@/composables/toast'
 import {
-  listSourcesApi,
-  createSourceApi,
-  updateSourceApi,
-  deleteSourceApi,
-  checkSourceApi,
-  syncSourceApi,
-  listItemsApi,
-  getTypesApi,
-  type InfoSource,
-  type InfoItemBrief,
-  type SourceTypeSpec,
+  listSourcesApi, createSourceApi, updateSourceApi, deleteSourceApi,
+  checkSourceApi, syncSourceApi, listItemsApi, getTypesApi,
+  type InfoSource, type InfoItemBrief, type SourceTypeSpec,
 } from '@/api/sources'
 
 const sources = ref<InfoSource[]>([])
@@ -112,10 +121,15 @@ async function load() {
 function typeLabel(t: string) {
   return { website: '官方网站', local_folder: '本地文件夹', freshrss: 'FreshRSS' }[t] || t
 }
-function statusType(s: string) {
-  if (s === 'ok') return 'success'
-  if (s === 'error') return 'danger'
-  return 'warning'
+function typeIcon(t: string) {
+  return { website: '网', local_folder: '夹', freshrss: '阅' }[t] || '源'
+}
+function describe(s: InfoSource) {
+  const c = s.config || {}
+  if (s.type === 'website') return String(c.url || '')
+  if (s.type === 'local_folder') return String(c.folder_path || '')
+  if (s.type === 'freshrss') return String(c.base_url || '')
+  return ''
 }
 
 function openCreate() {
@@ -125,12 +139,11 @@ function openCreate() {
   configText.value = '{\n  "folder_path": ""\n}'
   dialogVisible.value = true
 }
-
-function openEdit(row: InfoSource) {
-  editing.value = row
-  form.name = row.name
-  form.type = row.type
-  configText.value = JSON.stringify(row.config, null, 2)
+function openEdit(s: InfoSource) {
+  editing.value = s
+  form.name = s.name
+  form.type = s.type
+  configText.value = JSON.stringify(s.config, null, 2)
   dialogVisible.value = true
 }
 
@@ -139,7 +152,7 @@ async function onSave() {
   try {
     config = JSON.parse(configText.value)
   } catch {
-    ElMessage.error('配置不是合法的 JSON')
+    showToast('配置不是合法的 JSON')
     return
   }
   try {
@@ -148,25 +161,25 @@ async function onSave() {
     } else {
       await createSourceApi({ name: form.name, type: form.type, config })
     }
-    ElMessage.success('保存成功')
+    showToast('保存成功')
     dialogVisible.value = false
     await load()
   } catch {
-    /* toast shown by interceptor */
+    /* 吐司由拦截器处理 */
   }
 }
 
-async function onDelete(row: InfoSource) {
-  await ElMessageBox.confirm(`确认删除信息源「${row.name}」？`, '提示', { type: 'warning' })
-  await deleteSourceApi(row.id)
-  ElMessage.success('已删除')
+async function onDelete(s: InfoSource) {
+  if (!confirm(`确认删除信息源「${s.name}」？`)) return
+  await deleteSourceApi(s.id)
+  showToast('已删除')
   await load()
 }
 
 async function onCheck(id: number) {
   try {
     const st = await checkSourceApi(id)
-    ElMessage[st.status === 'ok' ? 'success' : 'error'](st.message || st.status)
+    showToast(st.message || st.status)
     await load()
   } catch {
     /* handled */
@@ -175,26 +188,13 @@ async function onCheck(id: number) {
 
 async function onSync(id: number) {
   const { run_id } = await syncSourceApi(id)
-  ElMessage.success(`已提交同步，运行 ID: ${run_id}`)
+  showToast(`已提交同步，运行 ID: ${run_id}`)
   setTimeout(load, 1500)
 }
 
-async function openItems(row: InfoSource) {
-  currentSource.value = row
-  items.value = await listItemsApi(row.id)
+async function openItems(s: InfoSource) {
+  currentSource.value = s
+  items.value = await listItemsApi(s.id)
   itemsVisible.value = true
 }
 </script>
-
-<style scoped>
-.toolbar {
-  margin-bottom: 12px;
-  display: flex;
-  gap: 8px;
-}
-.hint {
-  font-size: 12px;
-  color: #909399;
-  margin-top: 4px;
-}
-</style>
