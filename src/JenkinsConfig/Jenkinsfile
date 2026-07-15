@@ -70,6 +70,7 @@ pipeline {
                     rsync -a --delete \
                       --exclude data --exclude logs --exclude .venv --exclude .ci-venv \
                       --exclude .pytest_cache --exclude __pycache__ --exclude node_modules \
+                      --exclude config/env.local \
                       src/ "$DEPLOY_DIR/"
                     mkdir -p "$DEPLOY_DIR/data" "$DEPLOY_DIR/data/downloads" "$DEPLOY_DIR/logs"
                     if [ ! -f "$DEPLOY_DIR/data/password.txt" ]; then

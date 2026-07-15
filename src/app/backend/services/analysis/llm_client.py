@@ -37,6 +37,15 @@ class LLMClient:
         self.timeout = timeout or settings.llm_timeout
         if not self.base_url or not self.api_key:
             raise LLMError("LLM base_url 或 api_key 未配置")
+        if self.api_key == "sk-请替换为真实Key":
+            raise LLMError(
+                "LLM api_key 仍为占位符，请在 config/env.local（推荐，不被部署覆盖）或 config/app.json 配置真实 api_key"
+            )
+        if not self.api_key.isascii():
+            raise LLMError(
+                "LLM api_key 含非 ASCII 字符，无法用于 HTTP 认证。"
+                "请在 config/env.local（推荐）或 config/app.json 配置真实 api_key"
+            )
 
     def chat(self, system: str, user: str) -> str:
         payload: dict[str, Any] = {
@@ -58,6 +67,13 @@ class LLMClient:
                 },
                 timeout=self.timeout,
             )
+        except httpx.TimeoutException as exc:
+            raise LLMError(
+                f"LLM 请求超时（{self.timeout}s）：{exc}。"
+                "通常因 endpoint 不可达或响应过慢——请检查 llm.base_url 是否可访问"
+                "（国内服务器通常无法直连 api.openai.com，需改用可达的 endpoint），"
+                "或适当调大 llm.timeout_seconds"
+            ) from exc
         except httpx.HTTPError as exc:
             raise LLMError(f"调用 LLM 失败: {exc}") from exc
         if r.status_code >= 400:

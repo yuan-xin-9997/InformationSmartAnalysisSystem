@@ -7,6 +7,11 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
+# 加载本地环境覆盖（config/env.local：存放 LLM Key 等敏感配置，不被部署覆盖、不入 Git）。
+if [ -f "$SCRIPT_DIR/config/env.local" ]; then
+  set -a; . "$SCRIPT_DIR/config/env.local"; set +a
+fi
+
 VENV="${ISAS_VENV:-$SCRIPT_DIR/.venv}"
 PYTHON="$VENV/bin/python"
 

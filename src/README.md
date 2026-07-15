@@ -39,6 +39,8 @@
 
 > **修改端口**：改 `config/app.json` 里的 `server.port` 后重启即可（`stop.sh` + `start.sh`，或触发 Jenkins 重建，或 `systemctl restart isas`）。启动/状态脚本、Jenkinsfile、systemd 单元均从 `app.json` 读取端口，无需改其它文件。`ISAS_SERVER_PORT` 环境变量可临时覆盖。
 
+> **敏感配置（LLM Key 等）用 `config/env.local`**：该文件覆盖 `app.json`（环境变量优先），**不被 Jenkins 部署覆盖、不入 Git**。复制模板 `cp config/env.local.example config/env.local`，填入真实值后重启。**国内服务器无法直连 `api.openai.com`**，请在 `env.local` 配置可达的 OpenAI 兼容 endpoint（如 DeepSeek `https://api.deepseek.com/v1` / 通义千问 / Moonshot / 智谱 / 本地 Ollama），并填入 `ISAS_LLM_API_KEY` 与 `ISAS_LLM_MODEL`，否则分析任务会因 LLM 不可达/未配置而失败。建议 `chmod 600 config/env.local`。
+
 | 配置项 | 说明 | 环境变量覆盖 |
 |---|---|---|
 | `server.host` / `server.port` | 监听地址与端口 | `ISAS_SERVER_HOST` / `ISAS_SERVER_PORT` |

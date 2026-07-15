@@ -36,3 +36,4 @@ Thumbs.db
 **/data/app.sqlite3
 **/data/downloads/
 **/data/password.txt
+**/config/env.local
