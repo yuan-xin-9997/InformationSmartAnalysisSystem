@@ -48,7 +48,7 @@ if [ -f "$PID_FILE" ] && kill -0 "$(cat "$PID_FILE")" >/dev/null 2>&1; then
 fi
 
 HOST="${ISAS_SERVER_HOST:-0.0.0.0}"
-PORT="${ISAS_SERVER_PORT:-8000}"
+PORT="${ISAS_SERVER_PORT:-28080}"
 nohup "$PYTHON" -m uvicorn app.backend.main:app --host "$HOST" --port "$PORT" \
   > "$LOG_DIR/server.out" 2>&1 &
 echo $! > "$PID_FILE"

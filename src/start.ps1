@@ -53,7 +53,7 @@ if (Test-Path $PidFile) {
 }
 
 $Host_ = if ($env:ISAS_SERVER_HOST) { $env:ISAS_SERVER_HOST } else { "0.0.0.0" }
-$Port = if ($env:ISAS_SERVER_PORT) { $env:ISAS_SERVER_PORT } else { "8000" }
+$Port = if ($env:ISAS_SERVER_PORT) { $env:ISAS_SERVER_PORT } else { "28080" }
 $ServerOut = Join-Path $LogDir "server.out"
 $ServerErr = Join-Path $LogDir "server.err"
 $proc = Start-Process -FilePath $PythonExe `

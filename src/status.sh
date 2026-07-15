@@ -4,7 +4,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PID_FILE="$SCRIPT_DIR/logs/server.pid"
-PORT="${ISAS_SERVER_PORT:-8000}"
+PORT="${ISAS_SERVER_PORT:-28080}"
 
 if [ -f "$PID_FILE" ]; then
   PID="$(cat "$PID_FILE")"

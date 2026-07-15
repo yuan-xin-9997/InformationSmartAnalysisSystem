@@ -40,7 +40,7 @@ class Settings:
 
         server = raw.get("server", {})
         self.server_host: str = _env("ISAS_SERVER_HOST", server.get("host", "0.0.0.0"))
-        self.server_port: int = int(_env("ISAS_SERVER_PORT", server.get("port", 8000)))
+        self.server_port: int = int(_env("ISAS_SERVER_PORT", server.get("port", 28080)))
 
         db = raw.get("database", {})
         self.database_path: Path = _resolve_path(

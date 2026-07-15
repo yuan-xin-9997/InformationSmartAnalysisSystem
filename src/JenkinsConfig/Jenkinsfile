@@ -27,7 +27,7 @@ pipeline {
     environment {
         APP_NAME = 'InformationSmartAnalysisSystem'
         DEPLOY_DIR = '/opt/InformationSmartAnalysisSystem'
-        PORT = '8000'
+        PORT = '28080'
     }
 
     stages {

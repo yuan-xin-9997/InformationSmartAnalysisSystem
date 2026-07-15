@@ -16,11 +16,11 @@ After=network.target
 Type=simple
 User=yuanxin
 WorkingDirectory=/opt/InformationSmartAnalysisSystem/src
-ExecStart=/opt/InformationSmartAnalysisSystem/src/.venv/bin/python -m uvicorn app.backend.main:app --host 0.0.0.0 --port 8000
+ExecStart=/opt/InformationSmartAnalysisSystem/src/.venv/bin/python -m uvicorn app.backend.main:app --host 0.0.0.0 --port 28080
 Restart=on-failure
 RestartSec=5
 Environment=ISAS_SERVER_HOST=0.0.0.0
-Environment=ISAS_SERVER_PORT=8000
+Environment=ISAS_SERVER_PORT=28080
 
 [Install]
 WantedBy=multi-user.target

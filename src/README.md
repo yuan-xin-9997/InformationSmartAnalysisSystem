@@ -108,9 +108,9 @@ Linux 亦可使用 `systemctl start/stop/status/restart isas`。
 
 ## 访问方式
 
-- 默认地址：`http://<服务器IP>:8000/`
-- 健康检查：`http://<服务器IP>:8000/api/health`
-- API 文档（Swagger）：`http://<服务器IP>:8000/docs`
+- 默认地址：`http://<服务器IP>:28080/`
+- 健康检查：`http://<服务器IP>:28080/api/health`
+- API 文档（Swagger）：`http://<服务器IP>:28080/docs`
 - 默认账号：`admin / admin123`（首次部署后请立即修改 `data/password.txt`）
 
 ## 测试

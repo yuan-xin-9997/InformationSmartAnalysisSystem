@@ -2,7 +2,7 @@
 
 Run from the ``src`` directory::
 
-    uvicorn app.backend.main:app --host 0.0.0.0 --port 8000
+    uvicorn app.backend.main:app --host 0.0.0.0 --port 28080
 """
 from __future__ import annotations
 

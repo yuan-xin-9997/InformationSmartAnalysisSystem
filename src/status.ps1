@@ -1,7 +1,7 @@
 # 查看信息智能分析系统状态 (Windows PowerShell)
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $PidFile = Join-Path $ScriptDir "logs\server.pid"
-$Port = if ($env:ISAS_SERVER_PORT) { $env:ISAS_SERVER_PORT } else { "8000" }
+$Port = if ($env:ISAS_SERVER_PORT) { $env:ISAS_SERVER_PORT } else { "28080" }
 
 if (Test-Path $PidFile) {
   $pidVal = [int](Get-Content $PidFile)
