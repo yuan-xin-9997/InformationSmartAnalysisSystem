@@ -1,101 +1,107 @@
-// 信息智能分析系统 Jenkins 流水线
-// 参照《生成Jenkinsfile的提示词.md》
+// 信息智能分析系统 Jenkins 部署流水线
+// 参照《生成Jenkinsfile的提示词.md》，采用与同服务器其它项目一致的模式：
+//   checkout scm（Jenkins 凭据拉取）-> 测试 -> 前端构建 -> 停服 -> rsync 更新 -> 启服 -> 健康检查
 //
 // Jenkins 任务配置：
 //   - 流水线类型：Pipeline script from SCM
 //   - 脚本路径：src/JenkinsConfig/Jenkinsfile
-//   - 远程仓库：SSH 形式（如 git@github.com:<owner>/InformationSmartAnalysisSystem.git）
-//   - 凭据：使用已配置的 SSH 凭据
-//   - 触发器：每 30 分钟轮询 GitHub 提交（SCM 轮询 H/30 * * * *）
+//   - 远程仓库：SSH 形式 git@github.com:yuan-xin-9997/InformationSmartAnalysisSystem.git
+//   - 凭据：truthanalysis-github-ssh（已配置）
+//   - 触发器：每 30 分钟轮询 GitHub 提交（H/30 * * * *）
 //
-// 部署路径由 DEPLOY_DIR 指定（默认 /opt/InformationSmartAnalysisSystem），
-// 请按实际部署位置调整。部署目录须为该仓库的一次 git clone。
+// 部署路径 DEPLOY_DIR=/opt/InformationSmartAnalysisSystem（首次部署前已由运维预创建并 chown 给 jenkins）。
 
 pipeline {
     agent any
 
-    environment {
-        DEPLOY_DIR = '/opt/InformationSmartAnalysisSystem'
-    }
-
     options {
         timestamps()
+        disableConcurrentBuilds()
         timeout(time: 30, unit: 'MINUTES')
     }
 
+    triggers {
+        pollSCM('H/30 * * * *')
+    }
+
+    environment {
+        APP_NAME = 'InformationSmartAnalysisSystem'
+        DEPLOY_DIR = '/opt/InformationSmartAnalysisSystem'
+        PORT = '8000'
+    }
+
     stages {
+        stage('Checkout') {
+            steps {
+                checkout scm
+            }
+        }
+
+        stage('后端测试') {
+            steps {
+                dir('src') {
+                    sh '''
+                        python3 -m venv .ci-venv
+                        .ci-venv/bin/python -m pip install --upgrade pip -q
+                        .ci-venv/bin/python -m pip install -r app/backend/requirements.txt -q
+                        .ci-venv/bin/python -m pytest -q
+                    '''
+                }
+            }
+        }
+
+        stage('前端构建') {
+            steps {
+                dir('src/app/frontend') {
+                    sh 'npm ci && npm run build'
+                }
+            }
+        }
+
         stage('停止当前服务') {
             steps {
-                sh """
-                    if [ -d "${DEPLOY_DIR}/src" ]; then
-                      cd "${DEPLOY_DIR}/src" && bash stop.sh || true
-                    fi
-                """
+                sh 'if [ -x "$DEPLOY_DIR/stop.sh" ]; then "$DEPLOY_DIR/stop.sh"; fi'
             }
         }
 
-        stage('拉取最新代码到部署路径') {
+        stage('更新部署') {
             steps {
-                sh """
-                    if [ ! -d "${DEPLOY_DIR}/.git" ]; then
-                        echo "错误：${DEPLOY_DIR} 不是 git 仓库，请先在该路径 clone 本项目"
-                        exit 1
+                sh '''
+                    set -e
+                    rsync -a --delete \
+                      --exclude data --exclude logs --exclude .venv --exclude .ci-venv \
+                      --exclude .pytest_cache --exclude __pycache__ --exclude node_modules \
+                      src/ "$DEPLOY_DIR/"
+                    mkdir -p "$DEPLOY_DIR/data" "$DEPLOY_DIR/data/downloads" "$DEPLOY_DIR/logs"
+                    if [ ! -f "$DEPLOY_DIR/data/password.txt" ]; then
+                      printf '# 格式: username:password:role  (role 取值: admin | user)\\n# admin 默认拥有所有页面权限；user 的可见页面由管理员在权限管理页配置。\\n# 修改本文件后，新用户在下次登录时会自动同步到数据库。\\nadmin:admin123:admin\\n' > "$DEPLOY_DIR/data/password.txt"
                     fi
-                    cd "${DEPLOY_DIR}"
-                    git fetch --all
-                    git reset --hard origin/\$(git rev-parse --abbrev-ref HEAD)
-                """
+                    chmod +x "$DEPLOY_DIR"/*.sh
+                '''
             }
         }
 
-        stage('安装依赖与构建前端') {
+        stage('启动与健康检查') {
             steps {
-                sh """
-                    cd "${DEPLOY_DIR}/src"
-                    # 创建/复用虚拟环境并安装后端依赖
-                    if [ ! -x ".venv/bin/python" ]; then
-                        python3 -m venv .venv
-                    fi
-                    .venv/bin/python -m pip install --upgrade pip -q
-                    .venv/bin/python -m pip install -r app/backend/requirements.txt -q
-                    # 构建前端
-                    if command -v npm >/dev/null 2>&1; then
-                        cd app/frontend
-                        npm install --no-audit --no-fund
-                        npm run build
-                    else
-                        echo "警告：未安装 npm，跳过前端构建（仅提供后端 API）"
-                    fi
-                """
-            }
-        }
-
-        stage('启动服务') {
-            steps {
-                sh """
-                    cd "${DEPLOY_DIR}/src"
-                    bash start.sh
-                """
-            }
-        }
-
-        stage('健康检查') {
-            steps {
-                sh """
-                    cd "${DEPLOY_DIR}/src"
-                    sleep 3
-                    bash status.sh
-                """
+                sh '''
+                    JENKINS_NODE_COOKIE=dontKillMe "$DEPLOY_DIR/start.sh"
+                    sleep 5
+                    "$DEPLOY_DIR/status.sh"
+                    curl -fsS "http://127.0.0.1:$PORT/api/health"
+                '''
             }
         }
     }
 
     post {
         failure {
-            echo '部署失败，请检查上方日志'
+            sh '''
+                [ -f "$DEPLOY_DIR/logs/server.err" ] && tail -n 80 "$DEPLOY_DIR/logs/server.err" || true
+                [ -f "$DEPLOY_DIR/logs/server.out" ] && tail -n 50 "$DEPLOY_DIR/logs/server.out" || true
+            '''
         }
         success {
-            echo "部署成功，访问 http://192.168.0.111:8000 验证"
+            echo "部署成功，访问 http://192.168.0.111:${PORT} 验证"
         }
     }
 }
