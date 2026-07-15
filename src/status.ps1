@@ -1,7 +1,12 @@
 # 查看信息智能分析系统状态 (Windows PowerShell)
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $PidFile = Join-Path $ScriptDir "logs\server.pid"
-$Port = if ($env:ISAS_SERVER_PORT) { $env:ISAS_SERVER_PORT } else { "28080" }
+# 端口优先取 ISAS_SERVER_PORT 环境变量；否则读 config/app.json；均失败回落 28080
+if (-not $env:ISAS_SERVER_PORT) {
+  try { $env:ISAS_SERVER_PORT = (Get-Content (Join-Path $ScriptDir "config\app.json") -Raw | ConvertFrom-Json).server.port.ToString() }
+  catch { $env:ISAS_SERVER_PORT = "28080" }
+}
+$Port = $env:ISAS_SERVER_PORT
 
 if (Test-Path $PidFile) {
   $pidVal = [int](Get-Content $PidFile)

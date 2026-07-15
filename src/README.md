@@ -37,6 +37,8 @@
 
 主配置文件：`config/app.json`。所有环境相关信息（IP、端口、凭证、路径）均集中于此，代码中不硬编码。敏感字段（`secret_key`/`api_key`/`api_token` 等）可在「系统配置」页查看（已脱敏）。
 
+> **修改端口**：改 `config/app.json` 里的 `server.port` 后重启即可（`stop.sh` + `start.sh`，或触发 Jenkins 重建，或 `systemctl restart isas`）。启动/状态脚本、Jenkinsfile、systemd 单元均从 `app.json` 读取端口，无需改其它文件。`ISAS_SERVER_PORT` 环境变量可临时覆盖。
+
 | 配置项 | 说明 | 环境变量覆盖 |
 |---|---|---|
 | `server.host` / `server.port` | 监听地址与端口 | `ISAS_SERVER_HOST` / `ISAS_SERVER_PORT` |

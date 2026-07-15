@@ -53,7 +53,12 @@ if (Test-Path $PidFile) {
 }
 
 $Host_ = if ($env:ISAS_SERVER_HOST) { $env:ISAS_SERVER_HOST } else { "0.0.0.0" }
-$Port = if ($env:ISAS_SERVER_PORT) { $env:ISAS_SERVER_PORT } else { "28080" }
+# 端口优先取 ISAS_SERVER_PORT 环境变量；否则读 config/app.json；均失败回落 28080
+if (-not $env:ISAS_SERVER_PORT) {
+  try { $env:ISAS_SERVER_PORT = (Get-Content (Join-Path $ScriptDir "config\app.json") -Raw | ConvertFrom-Json).server.port.ToString() }
+  catch { $env:ISAS_SERVER_PORT = "28080" }
+}
+$Port = $env:ISAS_SERVER_PORT
 $ServerOut = Join-Path $LogDir "server.out"
 $ServerErr = Join-Path $LogDir "server.err"
 $proc = Start-Process -FilePath $PythonExe `

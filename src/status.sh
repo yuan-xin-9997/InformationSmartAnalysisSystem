@@ -4,7 +4,11 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PID_FILE="$SCRIPT_DIR/logs/server.pid"
-PORT="${ISAS_SERVER_PORT:-28080}"
+# 端口优先取 ISAS_SERVER_PORT 环境变量；否则读 config/app.json；均失败回落 28080
+if [ -z "${ISAS_SERVER_PORT:-}" ]; then
+  ISAS_SERVER_PORT=$(python3 -c "import json;print(json.load(open('$SCRIPT_DIR/config/app.json'))['server']['port'])" 2>/dev/null || echo 28080)
+fi
+PORT="$ISAS_SERVER_PORT"
 
 if [ -f "$PID_FILE" ]; then
   PID="$(cat "$PID_FILE")"

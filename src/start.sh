@@ -48,7 +48,11 @@ if [ -f "$PID_FILE" ] && kill -0 "$(cat "$PID_FILE")" >/dev/null 2>&1; then
 fi
 
 HOST="${ISAS_SERVER_HOST:-0.0.0.0}"
-PORT="${ISAS_SERVER_PORT:-28080}"
+# 端口优先取 ISAS_SERVER_PORT 环境变量；否则读 config/app.json；均失败回落 28080
+if [ -z "${ISAS_SERVER_PORT:-}" ]; then
+  ISAS_SERVER_PORT=$(python3 -c "import json;print(json.load(open('$SCRIPT_DIR/config/app.json'))['server']['port'])" 2>/dev/null || echo 28080)
+fi
+PORT="$ISAS_SERVER_PORT"
 nohup "$PYTHON" -m uvicorn app.backend.main:app --host "$HOST" --port "$PORT" \
   > "$LOG_DIR/server.out" 2>&1 &
 echo $! > "$PID_FILE"

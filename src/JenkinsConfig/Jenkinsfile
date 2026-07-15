@@ -27,7 +27,6 @@ pipeline {
     environment {
         APP_NAME = 'InformationSmartAnalysisSystem'
         DEPLOY_DIR = '/opt/InformationSmartAnalysisSystem'
-        PORT = '28080'
     }
 
     stages {
@@ -84,6 +83,7 @@ pipeline {
         stage('启动与健康检查') {
             steps {
                 sh '''
+                    PORT=$(python3 -c "import json;print(json.load(open('$DEPLOY_DIR/config/app.json'))['server']['port'])" 2>/dev/null || echo 28080)
                     JENKINS_NODE_COOKIE=dontKillMe "$DEPLOY_DIR/start.sh"
                     sleep 5
                     "$DEPLOY_DIR/status.sh"
@@ -101,7 +101,10 @@ pipeline {
             '''
         }
         success {
-            echo "部署成功，访问 http://192.168.0.111:${PORT} 验证"
+            sh '''
+                PORT=$(python3 -c "import json;print(json.load(open('$DEPLOY_DIR/config/app.json'))['server']['port'])" 2>/dev/null || echo 28080)
+                echo "部署成功，访问 http://192.168.0.111:$PORT 验证"
+            '''
         }
     }
 }
