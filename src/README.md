@@ -39,7 +39,7 @@
 
 > **修改端口**：改 `config/app.json` 里的 `server.port` 后重启即可（`stop.sh` + `start.sh`，或触发 Jenkins 重建，或 `systemctl restart isas`）。启动/状态脚本、Jenkinsfile、systemd 单元均从 `app.json` 读取端口，无需改其它文件。`ISAS_SERVER_PORT` 环境变量可临时覆盖。
 
-> **敏感配置（LLM Key 等）用 `config/env.local`**：该文件覆盖 `app.json`（环境变量优先），**不被 Jenkins 部署覆盖、不入 Git**。复制模板 `cp config/env.local.example config/env.local`，填入真实值后重启。**国内服务器无法直连 `api.openai.com`**，请在 `env.local` 配置可达的 OpenAI 兼容 endpoint（如 DeepSeek `https://api.deepseek.com/v1` / 通义千问 / Moonshot / 智谱 / 本地 Ollama），并填入 `ISAS_LLM_API_KEY` 与 `ISAS_LLM_MODEL`，否则分析任务会因 LLM 不可达/未配置而失败。建议 `chmod 600 config/env.local`。
+> **敏感配置（LLM Key 等）不要写进 `app.json`**（会被 Jenkins 部署覆盖回占位符），请用 `config/env.local`--见下方「敏感配置与环境覆盖（env.local）」一节。
 
 | 配置项 | 说明 | 环境变量覆盖 |
 |---|---|---|
@@ -62,6 +62,30 @@
 - 本地文件夹：`{"folder_path":"/abs/path","patterns":["*.txt","*.md","*.pdf","*.docx","*.html"],"recursive":true,"max_items":100000}`
 - FreshRSS：`{"base_url":"http://freshrss.example.com","user":"admin","api_token":"<API Token>","stream":"user/-/state/com.google/reading-list","mark_as_read":false,"max_items":50}`
 
+### 敏感配置与环境覆盖（env.local）
+
+`config/app.json` 是主配置（随代码部署，敏感字段为占位符）。**真实敏感配置（LLM Key、JWT 密钥、WebFetch Key 等）应放在 `config/env.local`**，特性如下：
+
+- **覆盖优先级**：环境变量 > `app.json`。`env.local` 中以 `ISAS_*` 开头的变量覆盖 `app.json` 对应项（见上方配置表「环境变量覆盖」列）。
+- **持久**：`env.local` 不被 Jenkins 部署覆盖（`Jenkinsfile` 的 rsync 排除它）、不入 Git（`.gitignore` 忽略）--改 LLM Key 等不会被下次部署还原为占位符。
+- **自动加载**：`start.sh`、`run.sh`（systemd）启动时自动 `source` 该文件；修改后重启服务即生效。
+- **安全**：建议 `chmod 600 config/env.local`（仅属主可读）。
+
+使用方法：
+
+```bash
+cp config/env.local.example config/env.local   # 复制模板（模板已随代码部署）
+# 编辑 config/env.local，填入真实值，例如：
+#   ISAS_LLM_BASE_URL=https://ark.cn-beijing.volces.com/api/plan/v3
+#   ISAS_LLM_API_KEY=ark-xxxx
+#   ISAS_LLM_MODEL=doubao-seed-evolving
+#   ISAS_AUTH_SECRET_KEY=<随机串>
+chmod 600 config/env.local
+bash start.sh   # 重启生效（脚本会自动以部署属主运行并加载 env.local）
+```
+
+> **国内服务器注意**：通常无法直连 `api.openai.com`，必须在 `env.local` 配置可达的 OpenAI 兼容 endpoint（如火山方舟 Ark / DeepSeek / 通义千问 / Moonshot / 智谱 / 本地 Ollama）与 `ISAS_LLM_API_KEY`、`ISAS_LLM_MODEL`，否则分析任务会因 LLM 不可达而失败。LLM 客户端对占位符 Key、非 ASCII Key、请求超时会给出清晰提示。
+
 ## 部署方式
 
 ### 首次部署
@@ -70,7 +94,7 @@
 2. 执行启动脚本（脚本会自动创建 `data/`、`logs/`、默认 `password.txt`，创建虚拟环境并安装依赖，构建前端，启动服务）：
    - Windows：`.\src\start.ps1`
    - Linux/macOS：`bash src/start.sh`
-3. 首次部署后，请修改 `data/password.txt` 中的默认口令与 `config/app.json` 中的 `auth.secret_key`、`llm.api_key` 等敏感配置。
+3. 首次部署后，请修改 `data/password.txt` 中的默认口令；并通过 `config/env.local` 配置真实敏感信息（LLM Key、`ISAS_AUTH_SECRET_KEY` 等）--见上方「敏感配置与环境覆盖（env.local）」一节。**不要把真实 Key 写进 `config/app.json`**（会被 Jenkins 部署覆盖回占位符）。
 
 > 自定义虚拟环境位置可设置环境变量 `ISAS_VENV`（默认 `src/.venv`）。
 
