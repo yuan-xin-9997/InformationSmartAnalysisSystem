@@ -105,3 +105,27 @@ def test_custom_mode_analyzes_selected_items(client, admin_headers, sync_worker,
     # 自定义模式不推进水位线
     sources = client.get(f"/api/analysis-tasks/{tid}/sources", headers=admin_headers).json()
     assert sources[0]["last_analyzed_item_id"] is None
+
+
+def test_delete_task_cascades_results(client, admin_headers, sync_worker, mock_llm):
+    """SQLite 需开启 PRAGMA foreign_keys=ON 才会级联删除；删除任务应清除其分析结果。"""
+    from app.backend.core.database import SessionLocal
+    from app.backend.models.analysis import AnalysisResult
+
+    sid = _make_folder_source(client, admin_headers, {"a.txt": "内容A"})
+    tid = client.post(
+        "/api/analysis-tasks",
+        headers=admin_headers,
+        json={"name": "cascade", "config": {"mode": "per_item"}, "source_ids": [sid]},
+    ).json()["id"]
+    run = client.post(f"/api/analysis-tasks/{tid}/run", headers=admin_headers, json={"mode": "incremental"}).json()
+    rd = client.get(f"/api/task-center/runs/{run['run_id']}", headers=admin_headers).json()
+    assert rd["status"] == "succeeded"
+
+    with SessionLocal() as db:
+        assert db.query(AnalysisResult).filter(AnalysisResult.task_id == tid).count() == 1
+
+    client.delete(f"/api/analysis-tasks/{tid}", headers=admin_headers)
+
+    with SessionLocal() as db:
+        assert db.query(AnalysisResult).filter(AnalysisResult.task_id == tid).count() == 0
