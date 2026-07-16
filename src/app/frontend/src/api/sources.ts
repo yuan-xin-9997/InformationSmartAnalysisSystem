@@ -52,7 +52,15 @@ export const deleteSourceApi = (id: number) => request.delete<unknown, unknown>(
 export const checkSourceApi = (id: number) => request.post<unknown, SourceStatus>(`/api/info-sources/${id}/check`)
 export const syncSourceApi = (id: number) => request.post<unknown, { run_id: number; status: string }>(`/api/info-sources/${id}/sync`)
 export const getSourceStatusApi = (id: number) => request.get<unknown, SourceStatus>(`/api/info-sources/${id}/status`)
-export const listItemsApi = (id: number, limit = 50, offset = 0) =>
-  request.get<unknown, InfoItemBrief[]>(`/api/info-sources/${id}/items`, { params: { limit, offset } })
+export const listItemsApi = (id: number, limit = 50, offset = 0, analyzed?: boolean) =>
+  request.get<unknown, InfoItemBrief[]>(`/api/info-sources/${id}/items`, { params: { limit, offset, analyzed } })
+export const countItemsApi = (
+  id: number,
+  analyzed?: boolean,
+) =>
+  request.get<unknown, { total: number; all: number; analyzed: number; unanalyzed: number }>(
+    `/api/info-sources/${id}/items/count`,
+    { params: { analyzed } },
+  )
 export const getItemApi = (sourceId: number, itemId: number) =>
   request.get<unknown, InfoItem>(`/api/info-sources/${sourceId}/items/${itemId}`)

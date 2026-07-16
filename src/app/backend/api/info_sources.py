@@ -173,21 +173,46 @@ def sync_source(
     return {"run_id": run.id, "status": "pending"}
 
 
+@router.get("/{source_id}/items/count")
+def count_items(
+    source_id: int,
+    analyzed: bool | None = Query(None, description="true=已分析,false=未分析,省略=全部"),
+    _: User = Depends(require_page("info_sources")),
+    db: Session = Depends(get_db),
+):
+    """返回条目计数（供分页）。total 为按 analyzed 过滤后的数；all/analyzed/unanalyzed 为整体统计。"""
+    base = db.query(InfoItem).filter(InfoItem.source_id == source_id)
+    all_count = base.count()
+    analyzed_count = base.filter(InfoItem.analyzed.is_(True)).count()
+    unanalyzed_count = base.filter(InfoItem.analyzed.is_(False)).count()
+    if analyzed is True:
+        shown = analyzed_count
+    elif analyzed is False:
+        shown = unanalyzed_count
+    else:
+        shown = all_count
+    return {
+        "total": shown,
+        "all": all_count,
+        "analyzed": analyzed_count,
+        "unanalyzed": unanalyzed_count,
+    }
+
+
 @router.get("/{source_id}/items", response_model=list[InfoItemBrief])
 def list_items(
     source_id: int,
     limit: int = Query(50, ge=1, le=500),
     offset: int = Query(0, ge=0),
+    analyzed: bool | None = Query(None, description="true=已分析,false=未分析,省略=全部"),
     _: User = Depends(require_page("info_sources")),
     db: Session = Depends(get_db),
 ):
-    return db.scalars(
-        select(InfoItem)
-        .where(InfoItem.source_id == source_id)
-        .order_by(InfoItem.id.desc())
-        .limit(limit)
-        .offset(offset)
-    ).all()
+    q = select(InfoItem).where(InfoItem.source_id == source_id)
+    if analyzed is not None:
+        q = q.where(InfoItem.analyzed == analyzed)
+    q = q.order_by(InfoItem.id.desc()).limit(limit).offset(offset)
+    return db.scalars(q).all()
 
 
 @router.get("/{source_id}/items/{item_id}", response_model=InfoItemOut)

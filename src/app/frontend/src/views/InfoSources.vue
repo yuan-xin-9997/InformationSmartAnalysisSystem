@@ -69,7 +69,25 @@
           <div><p class="eyebrow">ITEMS</p><h2>条目 - {{ currentSource?.name }}</h2></div>
           <button type="button" @click="itemsVisible = false">×</button>
         </div>
-        <div v-if="!items.length" class="empty compact">暂无条目，先执行同步</div>
+        <div class="toolbar" style="margin-bottom:12px">
+          <div class="stats">
+            <strong>{{ counts.total }}</strong>
+            <span>条（共 {{ counts.all }}｜已分析 {{ counts.analyzed }} / 未分析 {{ counts.unanalyzed }}）</span>
+          </div>
+          <div class="button-row">
+            <select v-model="filter" style="width:auto" @change="onFilterChange">
+              <option value="">全部</option>
+              <option value="analyzed">已分析</option>
+              <option value="unanalyzed">未分析</option>
+            </select>
+            <select v-model.number="pageSize" style="width:auto" @change="onPageSizeChange">
+              <option :value="50">50/页</option>
+              <option :value="100">100/页</option>
+              <option :value="200">200/页</option>
+            </select>
+          </div>
+        </div>
+        <div v-if="!items.length" class="empty compact">无符合条件的条目</div>
         <table v-else>
           <thead><tr><th>标题</th><th>已分析</th><th>发布时间</th></tr></thead>
           <tbody>
@@ -80,6 +98,13 @@
             </tr>
           </tbody>
         </table>
+        <div class="toolbar" style="margin-top:12px">
+          <span class="muted" style="font-size:12px">第 {{ page }} / {{ totalPages }} 页</span>
+          <div class="button-row">
+            <button :disabled="page <= 1" @click="prevPage">上一页</button>
+            <button :disabled="page >= totalPages" @click="nextPage">下一页</button>
+          </div>
+        </div>
       </div>
     </div>
   </div>
@@ -90,7 +115,7 @@ import { computed, onMounted, reactive, ref } from 'vue'
 import { showToast } from '@/composables/toast'
 import {
   listSourcesApi, createSourceApi, updateSourceApi, deleteSourceApi,
-  checkSourceApi, syncSourceApi, listItemsApi, getTypesApi,
+  checkSourceApi, syncSourceApi, listItemsApi, countItemsApi, getTypesApi,
   type InfoSource, type InfoItemBrief, type SourceTypeSpec,
 } from '@/api/sources'
 
@@ -103,6 +128,10 @@ const configText = ref('{\n  "folder_path": ""\n}')
 const itemsVisible = ref(false)
 const currentSource = ref<InfoSource | null>(null)
 const items = ref<InfoItemBrief[]>([])
+const page = ref(1)
+const pageSize = ref(50)
+const filter = ref<'' | 'analyzed' | 'unanalyzed'>('')
+const counts = ref({ total: 0, all: 0, analyzed: 0, unanalyzed: 0 })
 
 const requiredHint = computed(() => {
   const spec = typeSpecs.value.find((t) => t.type === form.type)
@@ -192,9 +221,49 @@ async function onSync(id: number) {
   setTimeout(load, 1500)
 }
 
+const totalPages = computed(() => Math.max(1, Math.ceil(counts.value.total / pageSize.value)))
+
+function analyzedParam(): boolean | undefined {
+  return filter.value === 'analyzed' ? true : filter.value === 'unanalyzed' ? false : undefined
+}
+
+async function loadItems() {
+  if (!currentSource.value) return
+  const a = analyzedParam()
+  const offset = (page.value - 1) * pageSize.value
+  ;[items.value, counts.value] = await Promise.all([
+    listItemsApi(currentSource.value.id, pageSize.value, offset, a),
+    countItemsApi(currentSource.value.id, a),
+  ])
+}
+
 async function openItems(s: InfoSource) {
   currentSource.value = s
-  items.value = await listItemsApi(s.id)
+  page.value = 1
+  pageSize.value = 50
+  filter.value = ''
+  await loadItems()
   itemsVisible.value = true
+}
+
+function onFilterChange() {
+  page.value = 1
+  loadItems()
+}
+function onPageSizeChange() {
+  page.value = 1
+  loadItems()
+}
+function prevPage() {
+  if (page.value > 1) {
+    page.value--
+    loadItems()
+  }
+}
+function nextPage() {
+  if (page.value < totalPages.value) {
+    page.value++
+    loadItems()
+  }
 }
 </script>
