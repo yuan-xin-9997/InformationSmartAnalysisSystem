@@ -80,6 +80,9 @@ class FreshRSSAdapter(InfoSourceAdapter):
         known_ids: set[str] | None = None,
     ) -> list[InfoItemData]:
         known = known_ids or set()
+        # DB 读回的 last_sync_at 可能是 naive datetime，归一为 aware UTC。
+        if since and since.tzinfo is None:
+            since = since.replace(tzinfo=timezone.utc)
         params: dict = {"n": self.max_items}
         if since:
             params["ot"] = int(since.timestamp())

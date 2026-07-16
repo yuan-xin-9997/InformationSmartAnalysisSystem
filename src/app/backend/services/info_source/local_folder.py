@@ -89,6 +89,9 @@ class LocalFolderAdapter(InfoSourceAdapter):
         known_ids: set[str] | None = None,
     ) -> list[InfoItemData]:
         known = known_ids or set()
+        # DB 读回的 last_sync_at 可能是 naive datetime，归一为 aware UTC 再与 mtime 比较。
+        if since and since.tzinfo is None:
+            since = since.replace(tzinfo=timezone.utc)
         items: list[InfoItemData] = []
         # 按路径排序，保证同步顺序确定、可解释（不依赖文件系统遍历顺序）。
         for f in sorted(self._iter_files()):

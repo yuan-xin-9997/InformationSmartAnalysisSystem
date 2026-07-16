@@ -56,6 +56,22 @@ def test_local_folder_incremental_and_backfill(tmp_path):
     assert [it.title for it in second] == ["c.txt"]
 
 
+def test_local_folder_naive_since_does_not_crash(tmp_path):
+    """DB 读回的 last_sync_at 是 naive datetime，不应触发 offset-naive/aware 比较错误。"""
+    from datetime import datetime, timezone
+
+    from app.backend.services.info_source.local_folder import LocalFolderAdapter
+
+    (tmp_path / "a.txt").write_text("A", encoding="utf-8")
+    adapter = LocalFolderAdapter({"folder_path": str(tmp_path), "patterns": ["*.txt"]})
+    first = adapter.fetch_new_items()
+    known = {it.external_id for it in first}
+    # 模拟 SQLite 读回的 naive UTC datetime
+    naive_since = datetime.now(timezone.utc).replace(tzinfo=None)
+    # 不应抛 TypeError；已知未变更文件应被跳过
+    assert adapter.fetch_new_items(since=naive_since, known_ids=known) == []
+
+
 def test_website_adapter_with_mock_client():
     from app.backend.services.info_source.website import WebsiteAdapter
 
