@@ -51,6 +51,18 @@ class InfoItemOut(InfoItemBrief):
     content: str
 
 
+class ItemsQueryRequest(ORMBase):
+    source_ids: list[int]
+    limit: int = 50
+    offset: int = 0
+    analyzed: bool | None = None
+
+
+class ItemsQueryResponse(ORMBase):
+    items: list[InfoItemBrief]
+    total: int
+
+
 class SourceStatusOut(ORMBase):
     status: str
     message: str

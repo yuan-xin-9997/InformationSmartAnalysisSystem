@@ -159,18 +159,21 @@ def run_task(
     _: User = Depends(require_page("analysis_tasks")),
     db: Session = Depends(get_db),
 ):
-    if req.mode not in ("full", "incremental"):
+    if req.mode not in ("full", "incremental", "custom"):
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST, detail="mode 必须是 full 或 incremental"
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="mode 必须是 full、incremental 或 custom",
         )
     task = db.get(AnalysisTask, task_id)
     if task is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="分析任务不存在")
+    # 自定义模式（任务 config.mode=custom 或运行 mode=custom）：运行记录标记为 custom。
+    run_mode = "custom" if (req.mode == "custom" or (task.config or {}).get("mode") == "custom") else req.mode
     run = TaskRun(
         kind="analysis",
         ref_id=task_id,
         ref_name=task.name,
-        mode=req.mode,
+        mode=run_mode,
         status="pending",
     )
     db.add(run)

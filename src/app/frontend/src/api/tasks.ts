@@ -64,7 +64,7 @@ export const getTaskApi = (id: number) => request.get<unknown, AnalysisTaskDetai
 export const updateTaskApi = (id: number, data: Partial<{ name: string; description: string; config: Record<string, unknown>; source_ids: number[] }>) =>
   request.put<unknown, AnalysisTaskDetail>(`/api/analysis-tasks/${id}`, data)
 export const deleteTaskApi = (id: number) => request.delete<unknown, unknown>(`/api/analysis-tasks/${id}`)
-export const runTaskApi = (id: number, mode: 'full' | 'incremental') =>
+export const runTaskApi = (id: number, mode: 'full' | 'incremental' | 'custom') =>
   request.post<unknown, { run_id: number; status: string }>(`/api/analysis-tasks/${id}/run`, { mode })
 export const listTaskResultsApi = (taskId: number, runId?: number) =>
   request.get<unknown, AnalysisResult[]>(`/api/analysis-tasks/${taskId}/results`, { params: { run_id: runId } })

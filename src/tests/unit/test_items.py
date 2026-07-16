@@ -55,3 +55,28 @@ def test_items_pagination(client, admin_headers, sync_worker, mock_llm):
     ).json()
     assert len(page1) == 1 and len(page2) == 1
     assert page1[0]["id"] != page2[0]["id"]  # 不同页不同条目
+
+
+def test_items_query_across_sources(client, admin_headers, sync_worker, mock_llm):
+    sid = _make_source(client, admin_headers)
+
+    r = client.post(
+        "/api/info-sources/items/query",
+        headers=admin_headers,
+        json={"source_ids": [sid], "limit": 10},
+    ).json()
+    assert r["total"] == 2 and len(r["items"]) == 2
+
+    # 空 source_ids
+    r2 = client.post(
+        "/api/info-sources/items/query", headers=admin_headers, json={"source_ids": []}
+    ).json()
+    assert r2["total"] == 0 and r2["items"] == []
+
+    # analyzed 过滤
+    r3 = client.post(
+        "/api/info-sources/items/query",
+        headers=admin_headers,
+        json={"source_ids": [sid], "analyzed": False},
+    ).json()
+    assert r3["total"] == 2

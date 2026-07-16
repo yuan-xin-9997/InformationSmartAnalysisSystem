@@ -79,3 +79,29 @@ def test_dedup_on_resync(client, admin_headers, sync_worker, mock_llm):
     client.post(f"/api/info-sources/{sid}/sync", headers=admin_headers)
     status = client.get(f"/api/info-sources/{sid}/status", headers=admin_headers).json()
     assert status["item_count"] == 1
+
+
+def test_custom_mode_analyzes_selected_items(client, admin_headers, sync_worker, mock_llm):
+    sid = _make_folder_source(client, admin_headers, {"a.txt": "内容A", "b.txt": "内容B", "c.txt": "内容C"})
+    items = client.get(f"/api/info-sources/{sid}/items?limit=10", headers=admin_headers).json()
+    assert len(items) == 3
+    selected = [items[0]["id"], items[1]["id"]]
+
+    tid = client.post(
+        "/api/analysis-tasks",
+        headers=admin_headers,
+        json={"name": "custom", "config": {"mode": "custom", "custom_item_ids": selected}, "source_ids": [sid]},
+    ).json()["id"]
+    run = client.post(f"/api/analysis-tasks/{tid}/run", headers=admin_headers, json={"mode": "custom"}).json()
+    rd = client.get(f"/api/task-center/runs/{run['run_id']}", headers=admin_headers).json()
+    assert rd["status"] == "succeeded"
+    assert "处理 2 条" in rd["summary"]
+    assert rd["mode"] == "custom"
+
+    res = client.get(f"/api/analysis-tasks/{tid}/results", headers=admin_headers).json()
+    assert len(res) == 2
+    assert sorted(r["info_item_id"] for r in res) == sorted(selected)
+
+    # 自定义模式不推进水位线
+    sources = client.get(f"/api/analysis-tasks/{tid}/sources", headers=admin_headers).json()
+    assert sources[0]["last_analyzed_item_id"] is None

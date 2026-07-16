@@ -66,56 +66,92 @@ def run_analysis(
             total_items = 0
             total_results = 0
 
-            for ts in task_sources:
-                source = ts.source
-                if source is None:
-                    continue
-                q = db.query(InfoItem).filter(InfoItem.source_id == ts.source_id)
-                if mode == "incremental" and ts.last_analyzed_item_id:
-                    q = q.filter(InfoItem.id > ts.last_analyzed_item_id)
-                items = q.order_by(InfoItem.id.asc()).limit(max_per).all()
-
+            # 自定义模式：分析用户在任务 config.custom_item_ids 中指定的条目（不推进水位线）。
+            if analysis_mode == "custom" or mode == "custom":
+                custom_ids = list(cfg.get("custom_item_ids") or [])
+                bound_ids = [ts.source_id for ts in task_sources]
+                items = []
+                if custom_ids and bound_ids:
+                    items = (
+                        db.query(InfoItem)
+                        .filter(
+                            InfoItem.id.in_(custom_ids),
+                            InfoItem.source_id.in_(bound_ids),
+                        )
+                        .order_by(InfoItem.id.asc())
+                        .all()
+                    )
                 if not items:
-                    _log(db, run_id, "INFO", f"源 [{source.name}] 无新内容，跳过")
-                    continue
-                _log(db, run_id, "INFO", f"源 [{source.name}] 待分析 {len(items)} 条")
-
-                if analysis_mode == "aggregate":
-                    system, user = P.render_aggregate(system_prompt, user_template, items)
+                    _log(db, run_id, "WARNING", "自定义模式未选中任何条目（或选中条目不属于已绑定信息源）")
+                else:
+                    _log(db, run_id, "INFO", f"自定义模式：分析选中的 {len(items)} 条")
+                for it in items:
+                    system, user = P.render_per_item(system_prompt, user_template, it)
                     content = llm.chat(system, user)
                     db.add(
                         AnalysisResult(
                             task_run_id=run_id,
                             task_id=task_id,
-                            source_id=ts.source_id,
-                            info_item_id=None,
-                            result_type="aggregate",
+                            source_id=it.source_id,
+                            info_item_id=it.id,
+                            result_type="per_item",
                             content=content,
                         )
                     )
-                    for it in items:
-                        it.analyzed = True
+                    it.analyzed = True
                     total_results += 1
-                else:
-                    for it in items:
-                        system, user = P.render_per_item(system_prompt, user_template, it)
+                total_items = len(items)
+            else:
+                for ts in task_sources:
+                    source = ts.source
+                    if source is None:
+                        continue
+                    q = db.query(InfoItem).filter(InfoItem.source_id == ts.source_id)
+                    if mode == "incremental" and ts.last_analyzed_item_id:
+                        q = q.filter(InfoItem.id > ts.last_analyzed_item_id)
+                    items = q.order_by(InfoItem.id.asc()).limit(max_per).all()
+
+                    if not items:
+                        _log(db, run_id, "INFO", f"源 [{source.name}] 无新内容，跳过")
+                        continue
+                    _log(db, run_id, "INFO", f"源 [{source.name}] 待分析 {len(items)} 条")
+
+                    if analysis_mode == "aggregate":
+                        system, user = P.render_aggregate(system_prompt, user_template, items)
                         content = llm.chat(system, user)
                         db.add(
                             AnalysisResult(
                                 task_run_id=run_id,
                                 task_id=task_id,
                                 source_id=ts.source_id,
-                                info_item_id=it.id,
-                                result_type="per_item",
+                                info_item_id=None,
+                                result_type="aggregate",
                                 content=content,
                             )
                         )
-                        it.analyzed = True
+                        for it in items:
+                            it.analyzed = True
                         total_results += 1
+                    else:
+                        for it in items:
+                            system, user = P.render_per_item(system_prompt, user_template, it)
+                            content = llm.chat(system, user)
+                            db.add(
+                                AnalysisResult(
+                                    task_run_id=run_id,
+                                    task_id=task_id,
+                                    source_id=ts.source_id,
+                                    info_item_id=it.id,
+                                    result_type="per_item",
+                                    content=content,
+                                )
+                            )
+                            it.analyzed = True
+                            total_results += 1
 
-                ts.last_analyzed_item_id = items[-1].id
-                ts.last_analyzed_at = utcnow()
-                total_items += len(items)
+                    ts.last_analyzed_item_id = items[-1].id
+                    ts.last_analyzed_at = utcnow()
+                    total_items += len(items)
 
             run.status = "succeeded"
             run.finished_at = utcnow()

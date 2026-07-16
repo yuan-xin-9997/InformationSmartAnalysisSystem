@@ -64,3 +64,20 @@ export const countItemsApi = (
   )
 export const getItemApi = (sourceId: number, itemId: number) =>
   request.get<unknown, InfoItem>(`/api/info-sources/${sourceId}/items/${itemId}`)
+
+export interface ItemsQueryResp {
+  items: InfoItemBrief[]
+  total: number
+}
+export const queryItemsApi = (
+  source_ids: number[],
+  limit = 50,
+  offset = 0,
+  analyzed?: boolean,
+) =>
+  request.post<unknown, ItemsQueryResp>('/api/info-sources/items/query', {
+    source_ids,
+    limit,
+    offset,
+    analyzed,
+  })

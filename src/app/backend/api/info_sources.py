@@ -16,6 +16,8 @@ from ..schemas.info_source import (
     InfoSourceCreate,
     InfoSourceOut,
     InfoSourceUpdate,
+    ItemsQueryRequest,
+    ItemsQueryResponse,
     SourceStatusOut,
 )
 from ..services import worker
@@ -30,6 +32,34 @@ router = APIRouter(prefix="/api/info-sources", tags=["信息源管理"])
 def get_types(_: User = Depends(require_page("info_sources"))):
     """Supported source types + their required config keys (for the form)."""
     return type_specs()
+
+
+@router.post("/items/query", response_model=ItemsQueryResponse)
+def query_items(
+    req: ItemsQueryRequest,
+    _: User = Depends(require_page("info_sources")),
+    db: Session = Depends(get_db),
+):
+    """跨多个信息源分页查询条目（供自定义分析模式的条目选择器）。"""
+    if not req.source_ids:
+        return ItemsQueryResponse(items=[], total=0)
+    base = db.query(InfoItem).filter(InfoItem.source_id.in_(req.source_ids))
+    if req.analyzed is not None:
+        base = base.filter(InfoItem.analyzed == req.analyzed)
+    total = base.count()
+    rows = (
+        db.scalars(
+            select(InfoItem)
+            .where(InfoItem.source_id.in_(req.source_ids))
+            .order_by(InfoItem.id.desc())
+            .limit(req.limit)
+            .offset(req.offset)
+        )
+        .all()
+    )
+    if req.analyzed is not None:
+        rows = [r for r in rows if r.analyzed == req.analyzed]
+    return ItemsQueryResponse(items=rows, total=total)
 
 
 @router.get("", response_model=list[InfoSourceOut])
