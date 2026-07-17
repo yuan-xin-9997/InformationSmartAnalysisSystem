@@ -22,7 +22,7 @@
     "model": "gpt-4o-mini",
     "temperature": 0.3,
     "max_tokens": 2000,
-    "timeout_seconds": 60
+    "timeout_seconds": 120
   },
   "freshrss": {
     "default_base_url": "",

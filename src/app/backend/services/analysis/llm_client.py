@@ -57,25 +57,32 @@ class LLMClient:
             "temperature": self.temperature,
             "max_tokens": self.max_tokens,
         }
-        try:
-            r = httpx.post(
-                f"{self.base_url}/chat/completions",
-                json=payload,
-                headers={
-                    "Authorization": f"Bearer {self.api_key}",
-                    "Content-Type": "application/json",
-                },
-                timeout=self.timeout,
-            )
-        except httpx.TimeoutException as exc:
-            raise LLMError(
-                f"LLM 请求超时（{self.timeout}s）：{exc}。"
-                "通常因 endpoint 不可达或响应过慢——请检查 llm.base_url 是否可访问"
-                "（国内服务器通常无法直连 api.openai.com，需改用可达的 endpoint），"
-                "或适当调大 llm.timeout_seconds"
-            ) from exc
-        except httpx.HTTPError as exc:
-            raise LLMError(f"调用 LLM 失败: {exc}") from exc
+        headers = {
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json",
+        }
+        # 超时自动重试一次（推理模型对长文本响应较慢，偶发超时可重试）。
+        r = None
+        for attempt in (1, 2):
+            try:
+                r = httpx.post(
+                    f"{self.base_url}/chat/completions",
+                    json=payload,
+                    headers=headers,
+                    timeout=self.timeout,
+                )
+                break
+            except httpx.TimeoutException as exc:
+                if attempt == 1:
+                    _logger.warning("LLM 请求超时(%.1fs)，重试一次", self.timeout)
+                    continue
+                raise LLMError(
+                    f"LLM 请求超时（{self.timeout}s）：{exc}。"
+                    "通常因 endpoint 不可达或响应过慢，请检查 llm.base_url 是否可访问，"
+                    "或适当调大 llm.timeout_seconds；长文本 + 推理模型建议 ≥180s。"
+                ) from exc
+            except httpx.HTTPError as exc:
+                raise LLMError(f"调用 LLM 失败: {exc}") from exc
         if r.status_code >= 400:
             raise LLMError(f"LLM 返回 {r.status_code}: {r.text[:300]}")
         try:
