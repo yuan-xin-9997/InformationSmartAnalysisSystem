@@ -20,7 +20,7 @@
             <h3>{{ r.source_name || '未知源' }}</h3>
             <span :class="['pill', r.result_type === 'aggregate' ? 'warning' : 'ok']">{{ r.result_type === 'aggregate' ? '汇总' : '逐条' }}</span>
           </div>
-          <p>{{ r.content.slice(0, 120) }}</p>
+          <p>{{ stripMd(r.content).slice(0, 120) }}</p>
           <div class="meta"><span>{{ r.created_at }}</span></div>
         </div>
       </article>
@@ -32,7 +32,7 @@
           <div><p class="eyebrow">ANALYSIS</p><h2>分析内容</h2></div>
           <button type="button" @click="contentVisible = false">×</button>
         </div>
-        <pre class="content-pre">{{ currentContent }}</pre>
+        <div class="markdown" v-html="renderMd(currentContent)"></div>
       </div>
     </div>
   </div>
@@ -45,6 +45,7 @@ import {
   listTasksApi, listAllResultsApi, listTaskResultsApi,
   type AnalysisTask, type AnalysisResult,
 } from '@/api/tasks'
+import { renderMarkdown, stripMarkdown } from '@/utils/markdown'
 
 const route = useRoute()
 const tasks = ref<AnalysisTask[]>([])
@@ -52,6 +53,9 @@ const taskId = ref<number | undefined>(undefined)
 const results = ref<AnalysisResult[]>([])
 const contentVisible = ref(false)
 const currentContent = ref('')
+
+const renderMd = renderMarkdown
+const stripMd = stripMarkdown
 
 onMounted(async () => {
   tasks.value = await listTasksApi()
