@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -17,6 +17,7 @@ from .api import analysis_tasks as analysis_tasks_api
 from .api import auth as auth_api
 from .api import config_view as config_api
 from .api import info_sources as info_sources_api
+from .api import scheduled_jobs as scheduled_jobs_api
 from .api import task_center as task_center_api
 from .api import users as users_api
 from .core.config import PROJECT_ROOT, settings
@@ -25,6 +26,7 @@ from .core.logging import cleanup_old_logs, get_logger, setup_logging
 from .core.runtime import set_started_at
 from .core.security import sync_users_from_password_file
 from .core.timeutil import utcnow
+from .services import scheduler as sched_svc
 from .services import worker
 
 
@@ -42,7 +44,9 @@ async def lifespan(app: FastAPI):
     # sync tolerates a missing file and is a no-op).
     with SessionLocal() as db:
         sync_users_from_password_file(db)
+    sched_svc.start_scheduler()
     yield
+    sched_svc.shutdown_scheduler()
     worker.shutdown()
     logger.info("信息智能分析系统已停止")
 
@@ -63,7 +67,7 @@ app.include_router(config_api.router)
 app.include_router(task_center_api.router)
 app.include_router(info_sources_api.router)
 app.include_router(analysis_tasks_api.router)
-app.include_router(analysis_tasks_api.results_router)
+app.include_router(scheduled_jobs_api.router)
 
 
 @app.get("/api/health")
@@ -84,7 +88,21 @@ if _frontend_dist.exists():
 
     @app.get("/{full_path:path}")
     def spa_fallback(full_path: str):
+        # 未匹配的 /api/* 路由应返回 404，不兜底到 SPA index.html
+        if full_path == "api" or full_path.startswith("api/"):
+            raise HTTPException(status_code=404, detail="Not Found")
         candidate = _frontend_dist / full_path
         if full_path and candidate.is_file():
             return FileResponse(str(candidate))
         return FileResponse(str(_index_html))
+
+    @app.api_route(
+        "/{full_path:path}", methods=["POST", "PUT", "DELETE", "PATCH"]
+    )
+    def api_method_not_found(full_path: str):
+        # 未匹配的 /api/* 非 GET 请求返回 404(而非默认 405),与 GET 行为一致;
+        # 已注册的 /api/* POST/PUT/DELETE/PATCH 路由优先匹配,不受影响。
+        # 非 /api/* 路径同样无服务端资源(SPA 仅服务 GET),统一 404。
+        if full_path == "api" or full_path.startswith("api/"):
+            raise HTTPException(status_code=404, detail="Not Found")
+        raise HTTPException(status_code=404, detail="Not Found")

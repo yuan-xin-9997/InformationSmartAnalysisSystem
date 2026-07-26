@@ -17,6 +17,7 @@ router = APIRouter(prefix="/api/task-center", tags=["任务中心"])
 @router.get("/runs", response_model=list[TaskRunOut])
 def list_runs(
     kind: str | None = Query(None, description="analysis | sync"),
+    ref_id: int | None = Query(None),
     status_: str | None = Query(None, alias="status"),
     limit: int = Query(100, ge=1, le=500),
     _: User = Depends(require_page("task_center")),
@@ -25,6 +26,8 @@ def list_runs(
     q = select(TaskRun).order_by(TaskRun.created_at.desc()).limit(limit)
     if kind:
         q = q.where(TaskRun.kind == kind)
+    if ref_id is not None:
+        q = q.where(TaskRun.ref_id == ref_id)
     if status_:
         q = q.where(TaskRun.status == status_)
     return db.scalars(q).all()

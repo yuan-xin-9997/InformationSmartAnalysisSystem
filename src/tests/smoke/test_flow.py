@@ -95,3 +95,49 @@ def test_full_flow(client, admin_headers, sync_worker, mock_llm):
 
     # unauthenticated request rejected
     assert client.get("/api/info-sources").status_code == 401
+
+
+def test_scheduled_job_flow_and_results_page_api(client, admin_headers, sync_worker, mock_llm):
+    # 建源 + 任务
+    src = client.post(
+        "/api/info-sources",
+        json={"name": "s", "type": "local_folder", "config": {"folder_path": "."}},
+        headers=admin_headers,
+    )
+    sid = src.json()["id"]
+    t = client.post(
+        "/api/analysis-tasks",
+        json={"name": "t", "config": {"mode": "per_item"}, "source_ids": [sid]},
+        headers=admin_headers,
+    )
+    tid = t.json()["id"]
+
+    # 建定时任务(间隔)并立即执行
+    sj = client.post(
+        "/api/scheduled-jobs",
+        json={"task_id": tid, "name": "每分钟", "mode": "incremental", "trigger_type": "interval", "interval_seconds": 60},
+        headers=admin_headers,
+    )
+    assert sj.status_code == 201
+    jid = sj.json()["id"]
+
+    run = client.post(f"/api/scheduled-jobs/{jid}/run", headers=admin_headers)
+    assert run.status_code == 200
+    rid = run.json()["run_id"]
+
+    # 任务中心能按 ref_id 查到该 run
+    runs = client.get(f"/api/task-center/runs?kind=analysis&ref_id={tid}", headers=admin_headers)
+    assert any(r["id"] == rid for r in runs.json())
+
+    # 结果详情页 API: 按任务取结果、按 run 取结果
+    res = client.get(f"/api/analysis-tasks/{tid}/results?run_id={rid}", headers=admin_headers)
+    assert res.status_code == 200
+
+    # 全局结果端点已删除: GET 与 POST 均应 404(而非 405)
+    gone = client.get("/api/analysis-results", headers=admin_headers)
+    assert gone.status_code == 404
+    assert client.post("/api/analysis-results", headers=admin_headers).status_code == 404
+
+    # 清理: 禁用并删除定时任务
+    assert client.post(f"/api/scheduled-jobs/{jid}/toggle", headers=admin_headers).status_code == 200
+    assert client.delete(f"/api/scheduled-jobs/{jid}", headers=admin_headers).status_code == 200

@@ -38,5 +38,11 @@
   "timezone_display": "Asia/Shanghai",
   "worker": {
     "max_workers": 4
+  },
+  "scheduler": {
+    "enabled": true,
+    "misfire_grace_seconds": 300,
+    "max_instances": 1,
+    "coalesce": true
   }
 }

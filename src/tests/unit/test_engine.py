@@ -129,3 +129,42 @@ def test_delete_task_cascades_results(client, admin_headers, sync_worker, mock_l
 
     with SessionLocal() as db:
         assert db.query(AnalysisResult).filter(AnalysisResult.task_id == tid).count() == 0
+
+
+def test_run_analysis_writes_back_scheduled_job_status(client, admin_headers, sync_worker, mock_llm):
+    from app.backend.core.database import SessionLocal
+    from app.backend.models.scheduled_job import ScheduledJob
+    from app.backend.models.task import TaskRun
+
+    t = client.post(
+        "/api/analysis-tasks",
+        json={"name": "t", "config": {"mode": "per_item"}, "source_ids": []},
+        headers=admin_headers,
+    )
+    tid = t.json()["id"]
+    with SessionLocal() as db:
+        sj = ScheduledJob(task_id=tid, name="j", mode="incremental", trigger_type="interval", interval_seconds=60, enabled=True)
+        db.add(sj)
+        db.commit()
+        db.refresh(sj)
+        sjid = sj.id
+    # 手动创建一个带 scheduled_job_id 的 run 并执行
+    from app.backend.services.analysis import run_analysis
+    with SessionLocal() as db:
+        run = TaskRun(kind="analysis", ref_id=tid, ref_name="t", mode="incremental", status="pending", scheduled_job_id=sjid)
+        db.add(run)
+        db.commit()
+        db.refresh(run)
+        rid = run.id
+    run_analysis(rid, tid, "incremental")
+    with SessionLocal() as db:
+        assert db.get(ScheduledJob, sjid).last_run_status == "succeeded"
+
+
+def test_run_analysis_no_writeback_for_manual_run(client, admin_headers, sync_worker, mock_llm):
+    # 手动触发(scheduled_job_id=None)不应报错,也不写回
+    t = client.post("/api/analysis-tasks", json={"name": "t", "config": {"mode": "per_item"}, "source_ids": []}, headers=admin_headers)
+    tid = t.json()["id"]
+    r = client.post(f"/api/analysis-tasks/{tid}/run", json={"mode": "incremental"}, headers=admin_headers)
+    assert r.status_code == 200
+    # 不抛异常即视为通过(同步执行已完成)

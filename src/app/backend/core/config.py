@@ -95,6 +95,16 @@ class Settings:
             _env("ISAS_WORKER_MAX_WORKERS", wk.get("max_workers", 4))
         )
 
+        sch = raw.get("scheduler", {})
+        self.scheduler_enabled: bool = _env("ISAS_SCHEDULER_ENABLED", sch.get("enabled", True)) in (True, "true", "True", 1, "1")
+        self.scheduler_misfire_grace_seconds: int = int(
+            _env("ISAS_SCHEDULER_MISFIRE_GRACE_SECONDS", sch.get("misfire_grace_seconds", 300))
+        )
+        self.scheduler_max_instances: int = int(
+            _env("ISAS_SCHEDULER_MAX_INSTANCES", sch.get("max_instances", 1))
+        )
+        self.scheduler_coalesce: bool = _env("ISAS_SCHEDULER_COALESCE", sch.get("coalesce", True)) in (True, "true", "True", 1, "1")
+
     @property
     def raw(self) -> dict[str, Any]:
         """The raw parsed ``app.json`` dict (for the system-config page)."""

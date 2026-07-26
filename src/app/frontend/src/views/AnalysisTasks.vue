@@ -280,7 +280,7 @@ async function openDetail(t: AnalysisTaskDetail) {
 }
 
 function goResults(taskId: number) {
-  router.push({ path: '/analysis-result', query: { task_id: taskId } })
+  router.push({ name: 'task-results', params: { id: taskId } })
 }
 
 // ---- 条目选择器 ----
