@@ -19,7 +19,7 @@ from sqlalchemy import select
 from ..core.config import settings
 from ..core.database import SessionLocal
 from ..core.logging import get_logger
-from ..core.timeutil import utcnow
+from ..core.timeutil import UTC, utcnow
 from ..models.analysis import AnalysisTask
 from ..models.scheduled_job import ScheduledJob
 from ..models.task import TaskRun
@@ -51,11 +51,19 @@ def _job_id(job_id: int) -> str:
 
 
 def _sync_next_run(job_id: int) -> None:
-    """Persist the scheduler's next_run_time back to the DB for display."""
+    """Persist the scheduler's next_run_time back to the DB for display.
+
+    APScheduler's ``next_run_time`` is tz-aware Asia/Shanghai (the scheduler's
+    timezone). SQLite's DateTime column strips tzinfo on store, so we must
+    normalize to UTC first; otherwise the naive value would be interpreted as
+    UTC by ``to_beijing`` and re-shifted +8h (total +8h display error).
+    """
     if _scheduler is None:
         return
     job = _scheduler.get_job(_job_id(job_id))
     nxt: datetime | None = getattr(job, "next_run_time", None) if job else None
+    if nxt is not None:
+        nxt = nxt.astimezone(UTC)
     with SessionLocal() as db:
         sj = db.get(ScheduledJob, job_id)
         if sj:

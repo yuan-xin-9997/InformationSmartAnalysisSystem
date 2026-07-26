@@ -17,6 +17,7 @@ from .api import analysis_tasks as analysis_tasks_api
 from .api import auth as auth_api
 from .api import config_view as config_api
 from .api import info_sources as info_sources_api
+from .api import scheduled_jobs as scheduled_jobs_api
 from .api import task_center as task_center_api
 from .api import users as users_api
 from .core.config import PROJECT_ROOT, settings
@@ -25,6 +26,7 @@ from .core.logging import cleanup_old_logs, get_logger, setup_logging
 from .core.runtime import set_started_at
 from .core.security import sync_users_from_password_file
 from .core.timeutil import utcnow
+from .services import scheduler as sched_svc
 from .services import worker
 
 
@@ -42,7 +44,9 @@ async def lifespan(app: FastAPI):
     # sync tolerates a missing file and is a no-op).
     with SessionLocal() as db:
         sync_users_from_password_file(db)
+    sched_svc.start_scheduler()
     yield
+    sched_svc.shutdown_scheduler()
     worker.shutdown()
     logger.info("信息智能分析系统已停止")
 
@@ -63,6 +67,7 @@ app.include_router(config_api.router)
 app.include_router(task_center_api.router)
 app.include_router(info_sources_api.router)
 app.include_router(analysis_tasks_api.router)
+app.include_router(scheduled_jobs_api.router)
 
 
 @app.get("/api/health")
