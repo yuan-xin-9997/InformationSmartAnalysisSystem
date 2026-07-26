@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -88,6 +88,9 @@ if _frontend_dist.exists():
 
     @app.get("/{full_path:path}")
     def spa_fallback(full_path: str):
+        # 未匹配的 /api/* 路由应返回 404，不兜底到 SPA index.html
+        if full_path == "api" or full_path.startswith("api/"):
+            raise HTTPException(status_code=404, detail="Not Found")
         candidate = _frontend_dist / full_path
         if full_path and candidate.is_file():
             return FileResponse(str(candidate))
