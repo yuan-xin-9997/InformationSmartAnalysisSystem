@@ -121,7 +121,10 @@ function taskName(tid: number) {
 }
 
 function scheduleText(j: ScheduledJob) {
-  return j.trigger_type === 'cron' ? `cron: ${j.cron_expr}` : `每 ${Math.round((j.interval_seconds || 0) / 60)} 分钟`
+  if (j.trigger_type === 'cron') return `cron: ${j.cron_expr}`
+  const secs = j.interval_seconds || 0
+  if (secs && secs < 60) return `每 ${secs} 秒`
+  return `每 ${Math.round(secs / 60)} 分钟`
 }
 
 function openCreate() {
@@ -178,8 +181,8 @@ async function onDelete(j: ScheduledJob) {
 }
 
 async function onToggle(j: ScheduledJob) {
-  await toggleScheduledJobApi(j.id)
-  showToast(j.enabled ? '已禁用' : '已启用')
+  const updated = await toggleScheduledJobApi(j.id)
+  showToast(updated.enabled ? '已启用' : '已禁用')
   await load()
 }
 

@@ -133,9 +133,10 @@ def test_scheduled_job_flow_and_results_page_api(client, admin_headers, sync_wor
     res = client.get(f"/api/analysis-tasks/{tid}/results?run_id={rid}", headers=admin_headers)
     assert res.status_code == 200
 
-    # 全局结果端点已删除
+    # 全局结果端点已删除: GET 与 POST 均应 404(而非 405)
     gone = client.get("/api/analysis-results", headers=admin_headers)
     assert gone.status_code == 404
+    assert client.post("/api/analysis-results", headers=admin_headers).status_code == 404
 
     # 清理: 禁用并删除定时任务
     assert client.post(f"/api/scheduled-jobs/{jid}/toggle", headers=admin_headers).status_code == 200

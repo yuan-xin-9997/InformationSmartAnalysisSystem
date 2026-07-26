@@ -95,3 +95,14 @@ if _frontend_dist.exists():
         if full_path and candidate.is_file():
             return FileResponse(str(candidate))
         return FileResponse(str(_index_html))
+
+    @app.api_route(
+        "/{full_path:path}", methods=["POST", "PUT", "DELETE", "PATCH"]
+    )
+    def api_method_not_found(full_path: str):
+        # 未匹配的 /api/* 非 GET 请求返回 404(而非默认 405),与 GET 行为一致;
+        # 已注册的 /api/* POST/PUT/DELETE/PATCH 路由优先匹配,不受影响。
+        # 非 /api/* 路径同样无服务端资源(SPA 仅服务 GET),统一 404。
+        if full_path == "api" or full_path.startswith("api/"):
+            raise HTTPException(status_code=404, detail="Not Found")
+        raise HTTPException(status_code=404, detail="Not Found")

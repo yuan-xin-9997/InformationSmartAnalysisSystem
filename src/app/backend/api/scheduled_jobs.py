@@ -1,6 +1,7 @@
 """Scheduled-job endpoints: CRUD, toggle, run-now."""
 from __future__ import annotations
 
+from apscheduler.triggers.cron import CronTrigger
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -46,8 +47,6 @@ def _validate_fields(
         raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="interval 模式必须填写大于 0 的间隔秒数")
     if trigger_type == "cron" and cron_expr:
         try:
-            from apscheduler.triggers.cron import CronTrigger
-
             CronTrigger.from_crontab(cron_expr)
         except Exception:  # noqa: BLE001  (any parse error -> 400)
             raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="cron 表达式不合法")
@@ -117,10 +116,18 @@ def update_job(
         req.interval_seconds if req.interval_seconds is not None else sj.interval_seconds
     )
     _validate_fields(merged_mode, merged_tt, merged_cron, merged_int)
+    old_tt = sj.trigger_type
     for f in ("name", "mode", "trigger_type", "cron_expr", "interval_seconds", "enabled"):
         v = getattr(req, f)
         if v is not None:
             setattr(sj, f, v)
+    # trigger_type 切换时清对方字段: 切到 cron 清 interval_seconds,切到 interval 清 cron_expr。
+    # 放在赋值循环之后,确保即使用户误传对方字段也被清空。
+    if req.trigger_type is not None and req.trigger_type != old_tt:
+        if req.trigger_type == "cron":
+            sj.interval_seconds = None
+        elif req.trigger_type == "interval":
+            sj.cron_expr = None
     db.commit()
     db.refresh(sj)
     sched_svc.reschedule_scheduled_job(sj)
@@ -153,6 +160,9 @@ def toggle_job(
     if sj is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail="定时任务不存在")
     sj.enabled = not sj.enabled
+    # 禁用时显式清空 DB 的 next_run_at,避免列表仍显示旧的下次运行时间。
+    if not sj.enabled:
+        sj.next_run_at = None
     db.commit()
     db.refresh(sj)
     if sj.enabled:

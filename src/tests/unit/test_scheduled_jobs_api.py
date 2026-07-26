@@ -53,8 +53,32 @@ def test_toggle_and_run_now(client, admin_headers, sync_worker, mock_llm):
     run = client.post(f"/api/scheduled-jobs/{jid}/run", headers=admin_headers)
     assert run.status_code == 200 and "run_id" in run.json()
 
+    # 启用时 next_run_at 应有值
+    before_toggle = client.get("/api/scheduled-jobs", headers=admin_headers).json()
+    before = next(j for j in before_toggle if j["id"] == jid)
+    assert before["next_run_at"] is not None
+
     tg = client.post(f"/api/scheduled-jobs/{jid}/toggle", headers=admin_headers)
     assert tg.status_code == 200 and tg.json()["enabled"] is False
+    # 禁用后 DB 的 next_run_at 必须清空,列表不再显示旧的下次运行时间
+    after_toggle = client.get("/api/scheduled-jobs", headers=admin_headers).json()
+    after = next(j for j in after_toggle if j["id"] == jid)
+    assert after["next_run_at"] is None
+
+
+def test_unmatched_api_non_get_returns_404_not_405(client, admin_headers):
+    """SPA fallback: 未匹配的 /api/* 非 GET 请求应返回 404,而非 405。
+
+    已注册的 /api/* POST/PUT/DELETE 路由优先匹配,不受影响。
+    """
+    # /api/analysis-results 已删除端点: GET 返回 404(spa_fallback)
+    assert client.get("/api/analysis-results", headers=admin_headers).status_code == 404
+    # POST/PUT/DELETE 同样应返回 404(而非 405)
+    assert client.post("/api/analysis-results", headers=admin_headers).status_code == 404
+    assert client.put("/api/analysis-results", headers=admin_headers).status_code == 404
+    assert client.delete("/api/analysis-results", headers=admin_headers).status_code == 404
+    # 已注册的 POST 路由仍正常工作(优先匹配)
+    assert client.post("/api/auth/login", json={"username": "admin", "password": "admin123"}).status_code == 200
 
 
 def test_forbidden_for_user_without_page(client):
@@ -125,3 +149,38 @@ def test_update_trigger_type_to_cron_without_any_cron_expr_returns_400(client, a
     jid = r.json()["id"]
     up = client.put(f"/api/scheduled-jobs/{jid}", json={"trigger_type": "cron"}, headers=admin_headers)
     assert up.status_code == 400
+
+
+def test_update_trigger_type_switch_clears_opposite_field(client, admin_headers):
+    """切换 trigger_type 时清对方字段: 切到 cron 清 interval_seconds,切到 interval 清 cron_expr。"""
+    tid = _make_task(client, admin_headers)
+    # 起点: interval 模式
+    r = client.post(
+        "/api/scheduled-jobs",
+        json={"task_id": tid, "name": "每分钟", "mode": "incremental",
+              "trigger_type": "interval", "interval_seconds": 60},
+        headers=admin_headers,
+    )
+    jid = r.json()["id"]
+
+    # 切到 cron: interval_seconds 应被清空
+    up = client.put(
+        f"/api/scheduled-jobs/{jid}",
+        json={"trigger_type": "cron", "cron_expr": "0 9 * * *"},
+        headers=admin_headers,
+    )
+    assert up.status_code == 200, up.text
+    assert up.json()["trigger_type"] == "cron"
+    assert up.json()["cron_expr"] == "0 9 * * *"
+    assert up.json()["interval_seconds"] is None
+
+    # 再切回 interval: cron_expr 应被清空
+    up2 = client.put(
+        f"/api/scheduled-jobs/{jid}",
+        json={"trigger_type": "interval", "interval_seconds": 120},
+        headers=admin_headers,
+    )
+    assert up2.status_code == 200, up2.text
+    assert up2.json()["trigger_type"] == "interval"
+    assert up2.json()["interval_seconds"] == 120
+    assert up2.json()["cron_expr"] is None
