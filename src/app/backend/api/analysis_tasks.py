@@ -24,7 +24,6 @@ from ..services import worker
 from ..services.analysis import run_analysis
 
 router = APIRouter(prefix="/api/analysis-tasks", tags=["分析任务"])
-results_router = APIRouter(prefix="/api/analysis-results", tags=["分析结果"])
 
 
 def _build_sources(task: AnalysisTask) -> list[TaskSourceOut]:
@@ -199,23 +198,6 @@ def list_task_results(
     )
     if run_id:
         q = q.where(AnalysisResult.task_run_id == run_id)
-    results = db.scalars(q).all()
-    return [_result_out(db, r) for r in results]
-
-
-@results_router.get("", response_model=list[AnalysisResultOut])
-def list_results(
-    run_id: int | None = Query(None),
-    task_id: int | None = Query(None),
-    limit: int = Query(100, ge=1, le=500),
-    _: User = Depends(require_page("analysis_result")),
-    db: Session = Depends(get_db),
-):
-    q = select(AnalysisResult).order_by(AnalysisResult.id.desc()).limit(limit)
-    if run_id:
-        q = q.where(AnalysisResult.task_run_id == run_id)
-    if task_id:
-        q = q.where(AnalysisResult.task_id == task_id)
     results = db.scalars(q).all()
     return [_result_out(db, r) for r in results]
 

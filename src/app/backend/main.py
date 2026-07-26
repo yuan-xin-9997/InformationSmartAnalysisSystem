@@ -63,7 +63,6 @@ app.include_router(config_api.router)
 app.include_router(task_center_api.router)
 app.include_router(info_sources_api.router)
 app.include_router(analysis_tasks_api.router)
-app.include_router(analysis_tasks_api.results_router)
 
 
 @app.get("/api/health")
