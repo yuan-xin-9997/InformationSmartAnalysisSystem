@@ -25,9 +25,9 @@
 | 登录 | `/login` | 用户名/密码登录 | 公开 |
 | 概览 | `/dashboard` | 信息源/任务/最近运行概览 | `dashboard` |
 | 信息源管理 | `/info-sources` | 三类信息源 CRUD、状态检查、手动同步、查看条目 | `info_sources` |
-| 分析任务 | `/analysis-tasks` | 任务 CRUD、绑定源、查看源状态、触发全量/增量分析 | `analysis_tasks` |
-| 分析结果 | `/analysis-result` | 查看分析产出（逐条/汇总） | `analysis_result` |
-| 任务中心 | `/task-center` | 系统任务运行列表、状态、日志 | `task_center` |
+| 分析任务 | `/analysis-tasks` | 任务 CRUD、绑定源、查看源状态、触发全量/增量分析；「结果」按钮下钻进入任务结果详情页（按运行批次分组、折叠展开 Markdown 渲染） | `analysis_tasks` |
+| 定时任务 | `/scheduled-jobs` | 为分析任务配置 cron/固定间隔定时执行，支持启用/禁用、立即执行、编辑、删除 | `scheduled_jobs` |
+| 任务中心 | `/task-center` | 系统任务运行列表、状态、日志（支持按 `ref_id` 过滤某任务的运行记录） | `task_center` |
 | 权限管理 | `/permission` | 用户/角色、普通用户页面权限配置（仅管理员） | `permission`（仅 admin） |
 | 系统配置 | `/system-config` | 展示 app.json（脱敏）与运行时信息 | `system_config` |
 
@@ -52,6 +52,8 @@
 | `llm.*` | 大模型接口（OpenAI 兼容） | `ISAS_LLM_BASE_URL` / `ISAS_LLM_API_KEY` / `ISAS_LLM_MODEL` |
 | `logging.*` | 日志级别/目录/保留天数 | `ISAS_LOG_LEVEL` / `ISAS_LOG_DIR` |
 | `worker.max_workers` | 后台任务线程数 | `ISAS_WORKER_MAX_WORKERS` |
+| `scheduler.*` | 定时任务调度器（`enabled`/`misfire_grace_seconds`/`max_instances`/`coalesce`，对应 APScheduler 同名参数） | `ISAS_SCHEDULER_ENABLED` / `ISAS_SCHEDULER_MISFIRE_GRACE_SECONDS` / `ISAS_SCHEDULER_MAX_INSTANCES` / `ISAS_SCHEDULER_COALESCE` |
+| `timezone_display` | 展示时区（默认 `Asia/Shanghai`，APScheduler 调度器亦使用此时区） | — |
 | `data_dir` | 数据目录 | `ISAS_DATA_DIR` |
 
 用户与角色维护在 `data/password.txt`（格式 `username:password:role`），修改后新用户在下次登录时自动同步到数据库。
@@ -143,6 +145,22 @@ Linux 亦可使用 `systemctl start/stop/status/restart isas`。
 - API 文档（Swagger）：`http://<服务器IP>:28080/docs`
 - 默认账号：`admin / admin123`（首次部署后请立即修改 `data/password.txt`）
 
+## API 接口概览
+
+所有接口位于 `/api` 前缀下，按页面权限拦截（管理员全放行）。完整定义见 Swagger `/docs`。
+
+| 模块 | 主要端点 |
+|---|---|
+| 认证 | `POST /api/auth/login`、`GET /api/auth/me`、`POST /api/auth/logout` |
+| 权限管理 | `GET /api/users`、`GET /api/users/pages`、`GET/PUT /api/users/{id}/permissions` |
+| 系统配置 | `GET /api/config` |
+| 任务中心 | `GET /api/task-center/runs`（支持 `ref_id`/`kind`/`status` 过滤）、`GET .../runs/{id}`、`GET .../runs/{id}/logs`、`DELETE .../runs/{id}` |
+| 信息源 | `GET /api/info-sources/types`、`GET/POST/PUT/DELETE /api/info-sources`、`POST .../{id}/check`、`POST .../{id}/sync`、`GET .../{id}/status`、`GET .../{id}/items` |
+| 分析任务 | `GET/POST/PUT/DELETE /api/analysis-tasks`、`POST .../{id}/run`、`GET .../{id}/sources`、`GET .../{id}/results`（支持 `run_id` 过滤） |
+| 定时任务 | `GET/POST /api/scheduled-jobs`、`PUT/DELETE /api/scheduled-jobs/{id}`、`POST .../{id}/toggle`、`POST .../{id}/run` |
+
+> 旧的全局端点 `GET /api/analysis-results` 已移除；查看分析结果请由分析任务「结果」按钮下钻进入 `/analysis-tasks/:id/results`（复用 `analysis_tasks` 权限）。未匹配的 `/api/*` GET 请求返回 404，不兜底到 SPA `index.html`。
+
 ## 测试
 
 ```bash
@@ -151,7 +169,7 @@ cd src
 .venv/bin/python -m pytest          # Linux/macOS
 ```
 
-包含单元测试（配置/鉴权/适配器/分析引擎/时间）与冒烟测试（端到端 API 流程），全部 mock 外部依赖，不依赖真实网络。
+包含单元测试（配置/鉴权/适配器/分析引擎/时间/定时任务调度器）与冒烟测试（端到端 API 流程，含定时任务 CRUD/启停/立即执行与分析结果下钻查看），全部 mock 外部依赖，不依赖真实网络。
 
 ## 目录结构
 
