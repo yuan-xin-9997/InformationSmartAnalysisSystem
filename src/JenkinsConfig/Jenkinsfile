@@ -40,9 +40,14 @@ pipeline {
             steps {
                 dir('src') {
                     sh '''
+                        set -e
+                        echo "=== 构建 commit ==="
+                        git log --oneline -1
+                        echo "=== requirements.txt 是否含 apscheduler ==="
+                        grep -n apscheduler app/backend/requirements.txt || echo "WARN: apscheduler 不在 requirements.txt"
                         python3 -m venv .ci-venv
-                        .ci-venv/bin/python -m pip install --upgrade pip -q
-                        .ci-venv/bin/python -m pip install -r app/backend/requirements.txt -q
+                        .ci-venv/bin/python -m pip install --upgrade pip -i https://pypi.tuna.tsinghua.edu.cn/simple
+                        .ci-venv/bin/python -m pip install -r app/backend/requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple
                         .ci-venv/bin/python -m pytest -q
                     '''
                 }
