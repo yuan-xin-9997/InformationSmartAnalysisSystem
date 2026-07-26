@@ -141,3 +141,67 @@ def test_scheduled_job_flow_and_results_page_api(client, admin_headers, sync_wor
     # 清理: 禁用并删除定时任务
     assert client.post(f"/api/scheduled-jobs/{jid}/toggle", headers=admin_headers).status_code == 200
     assert client.delete(f"/api/scheduled-jobs/{jid}", headers=admin_headers).status_code == 200
+
+
+def test_push_flow(client, admin_headers, sync_worker, mock_llm, monkeypatch):
+    """端到端推送冒烟：配 SMTP -> 建规则 -> 手动触发 -> 历史记录正确（mock 邮件发送）。"""
+    # mock 邮件发送，避免真实 SMTP
+    from app.backend.services.push.channels import email_channel
+
+    sent: list = []
+    monkeypatch.setattr(
+        email_channel.EmailChannel,
+        "send",
+        lambda self, cfg, recipients, subject, html, text: sent.append((list(recipients), subject)),
+    )
+
+    # 建源 + 同步 + 任务 + 跑出分析结果
+    d = pathlib.Path(tempfile.mkdtemp())
+    (d / "a.txt").write_text("关键事件A", encoding="utf-8")
+    sid = client.post(
+        "/api/info-sources",
+        headers=admin_headers,
+        json={"name": "s", "type": "local_folder", "config": {"folder_path": str(d), "patterns": ["*.txt"]}},
+    ).json()["id"]
+    client.post(f"/api/info-sources/{sid}/sync", headers=admin_headers)
+    tid = client.post(
+        "/api/analysis-tasks",
+        headers=admin_headers,
+        json={"name": "t", "config": {"mode": "per_item"}, "source_ids": [sid]},
+    ).json()["id"]
+    client.post(f"/api/analysis-tasks/{tid}/run", headers=admin_headers, json={"mode": "incremental"})
+    assert len(client.get(f"/api/analysis-tasks/{tid}/results", headers=admin_headers).json()) == 1
+
+    # 配置 SMTP（页面优先）
+    r = client.put(
+        "/api/push/smtp",
+        headers=admin_headers,
+        json={"host": "smtp.x.com", "port": 587, "from_email": "n@x.com", "password": "pw"},
+    )
+    assert r.status_code == 200
+
+    # 建推送规则（手动触发，选该任务 + per_item）
+    rule = client.post(
+        "/api/push/rules",
+        headers=admin_headers,
+        json={
+            "name": "推送1",
+            "task_ids": [tid],
+            "event_types": ["per_item"],
+            "recipients": ["to@x.com"],
+            "trigger_mode": "manual",
+        },
+    ).json()
+    rid = rule["id"]
+
+    # 手动触发 -> 同步执行推送
+    trig = client.post(f"/api/push/rules/{rid}/trigger", headers=admin_headers)
+    assert trig.status_code == 200
+    assert trig.json()["ok"] is True
+
+    # 历史应为成功、事件数=1、收件人正确
+    runs = client.get(f"/api/push/rules/{rid}/runs", headers=admin_headers).json()
+    assert len(runs) == 1
+    assert runs[0]["status"] == "succeeded"
+    assert runs[0]["event_count"] == 1
+    assert sent and sent[0][0] == ["to@x.com"]

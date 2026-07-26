@@ -16,7 +16,8 @@
 1. 信息源管理：支持「官方网站」「指定本地文件夹」「FreshRSS 指定源」三类信息源。
 2. 分析任务：创建任务并绑定多个信息源作为信息来源范围；展示每个绑定源的状态。
 3. 增量分析：基于信息源新增内容做增量分析（按 (任务,源) 水位线记录已分析位置）；亦支持全量分析。
-4. 基础模块：登录、权限管理、系统配置、任务中心（CLAUDE.md 规定必备）。
+4. 邮件推送：把增量分析结果按推送规则（选定任务/事件类型/收件人/触发方式）通过邮件推送到邮箱，支持「完成后自动 / 定时 / 手动」三种触发，SMTP 配置页面优先于 app.json。
+5. 基础模块：登录、权限管理、系统配置、任务中心（CLAUDE.md 规定必备）。
 
 ## 页面介绍
 
@@ -28,6 +29,7 @@
 | 分析任务 | `/analysis-tasks` | 任务 CRUD、绑定源、查看源状态、触发全量/增量分析；「结果」按钮下钻进入任务结果详情页（按运行批次分组、折叠展开 Markdown 渲染） | `analysis_tasks` |
 | 定时任务 | `/scheduled-jobs` | 为分析任务配置 cron/固定间隔定时执行，支持启用/禁用、立即执行、编辑、删除 | `scheduled_jobs` |
 | 任务中心 | `/task-center` | 系统任务运行列表、状态、日志（支持按 `ref_id` 过滤某任务的运行记录） | `task_center` |
+| 推送管理 | `/push-management` | 配置推送规则（选任务/事件类型/收件人/触发方式）与 SMTP，把增量分析结果推送到邮箱 | `push_management` |
 | 权限管理 | `/permission` | 用户/角色、普通用户页面权限配置（仅管理员） | `permission`（仅 admin） |
 | 系统配置 | `/system-config` | 展示 app.json（脱敏）与运行时信息 | `system_config` |
 
@@ -52,6 +54,7 @@
 | `llm.*` | 大模型接口（OpenAI 兼容） | `ISAS_LLM_BASE_URL` / `ISAS_LLM_API_KEY` / `ISAS_LLM_MODEL` |
 | `logging.*` | 日志级别/目录/保留天数 | `ISAS_LOG_LEVEL` / `ISAS_LOG_DIR` |
 | `worker.max_workers` | 后台任务线程数 | `ISAS_WORKER_MAX_WORKERS` |
+| `email.*` | SMTP 邮件推送（`smtp_host`/`smtp_port`/`use_tls`/`use_ssl`/`username`/`password`/`from_email`/`from_name`）；推送管理页配置优先于此处 | `ISAS_EMAIL_SMTP_HOST` / `ISAS_EMAIL_SMTP_PORT` / `ISAS_EMAIL_USE_TLS` / `ISAS_EMAIL_USE_SSL` / `ISAS_EMAIL_USERNAME` / `ISAS_EMAIL_PASSWORD` / `ISAS_EMAIL_FROM_EMAIL` / `ISAS_EMAIL_FROM_NAME` |
 | `scheduler.*` | 定时任务调度器（`enabled`/`misfire_grace_seconds`/`max_instances`/`coalesce`，对应 APScheduler 同名参数） | `ISAS_SCHEDULER_ENABLED` / `ISAS_SCHEDULER_MISFIRE_GRACE_SECONDS` / `ISAS_SCHEDULER_MAX_INSTANCES` / `ISAS_SCHEDULER_COALESCE` |
 | `timezone_display` | 展示时区（默认 `Asia/Shanghai`，APScheduler 调度器亦使用此时区） | — |
 | `data_dir` | 数据目录 | `ISAS_DATA_DIR` |
@@ -158,6 +161,7 @@ Linux 亦可使用 `systemctl start/stop/status/restart isas`。
 | 信息源 | `GET /api/info-sources/types`、`GET/POST/PUT/DELETE /api/info-sources`、`POST .../{id}/check`、`POST .../{id}/sync`、`GET .../{id}/status`、`GET .../{id}/items` |
 | 分析任务 | `GET/POST/PUT/DELETE /api/analysis-tasks`、`POST .../{id}/run`、`GET .../{id}/sources`、`GET .../{id}/results`（支持 `run_id` 过滤） |
 | 定时任务 | `GET/POST /api/scheduled-jobs`、`PUT/DELETE /api/scheduled-jobs/{id}`、`POST .../{id}/toggle`、`POST .../{id}/run` |
+| 推送 | `GET/PUT /api/push/smtp`、`POST /api/push/smtp/test`、`GET/POST/PUT/DELETE /api/push/rules`、`POST /api/push/rules/{id}/trigger`、`GET /api/push/rules/{id}/runs` |
 
 > 旧的全局端点 `GET /api/analysis-results` 已移除；查看分析结果请由分析任务「结果」按钮下钻进入 `/analysis-tasks/:id/results`（复用 `analysis_tasks` 权限）。未匹配的 `/api/*` GET 请求返回 404，不兜底到 SPA `index.html`。
 
