@@ -44,5 +44,15 @@
     "misfire_grace_seconds": 300,
     "max_instances": 1,
     "coalesce": true
+  },
+  "email": {
+    "smtp_host": "",
+    "smtp_port": 25,
+    "use_tls": false,
+    "use_ssl": false,
+    "username": "",
+    "password": "",
+    "from_email": "",
+    "from_name": "信息智能分析系统"
   }
 }

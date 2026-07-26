@@ -12,3 +12,8 @@ def test_analysis_result_removed():
 def test_scheduled_jobs_present():
     assert "scheduled_jobs" in ALL_PAGE_KEYS
     assert "scheduled_jobs" in GRANTABLE_PAGE_KEYS
+
+
+def test_push_management_present():
+    assert "push_management" in ALL_PAGE_KEYS
+    assert "push_management" in GRANTABLE_PAGE_KEYS

@@ -105,6 +105,16 @@ class Settings:
         )
         self.scheduler_coalesce: bool = _env("ISAS_SCHEDULER_COALESCE", sch.get("coalesce", True)) in (True, "true", "True", 1, "1")
 
+        em = raw.get("email", {})
+        self.email_smtp_host: str = _env("ISAS_EMAIL_SMTP_HOST", em.get("smtp_host", ""))
+        self.email_smtp_port: int = int(_env("ISAS_EMAIL_SMTP_PORT", em.get("smtp_port", 25)))
+        self.email_use_tls: bool = _env("ISAS_EMAIL_USE_TLS", em.get("use_tls", False)) in (True, "true", "True", 1, "1")
+        self.email_use_ssl: bool = _env("ISAS_EMAIL_USE_SSL", em.get("use_ssl", False)) in (True, "true", "True", 1, "1")
+        self.email_username: str = _env("ISAS_EMAIL_USERNAME", em.get("username", ""))
+        self.email_password: str = _env("ISAS_EMAIL_PASSWORD", em.get("password", ""))
+        self.email_from_email: str = _env("ISAS_EMAIL_FROM_EMAIL", em.get("from_email", ""))
+        self.email_from_name: str = _env("ISAS_EMAIL_FROM_NAME", em.get("from_name", "信息智能分析系统"))
+
     @property
     def raw(self) -> dict[str, Any]:
         """The raw parsed ``app.json`` dict (for the system-config page)."""
