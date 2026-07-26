@@ -18,3 +18,12 @@ def test_env_override(monkeypatch):
     s = Settings()
     assert s.server_port == 9999
     assert s.llm_model == "test-model"
+
+
+def test_scheduler_settings():
+    from app.backend.core.config import settings
+
+    assert settings.scheduler_enabled is True
+    assert settings.scheduler_misfire_grace_seconds == 300
+    assert settings.scheduler_max_instances == 1
+    assert settings.scheduler_coalesce is True
