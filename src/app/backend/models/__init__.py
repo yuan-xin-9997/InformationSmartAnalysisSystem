@@ -5,6 +5,7 @@ Importing each model module here registers it on ``Base.metadata`` so that
 """
 from .analysis import AnalysisResult, AnalysisTask, TaskSource
 from .info_source import InfoItem, InfoSource
+from .scheduled_job import ScheduledJob
 from .task import TaskLog, TaskRun
 from .user import PagePermission, User
 
@@ -18,4 +19,5 @@ __all__ = [
     "AnalysisTask",
     "TaskSource",
     "AnalysisResult",
+    "ScheduledJob",
 ]

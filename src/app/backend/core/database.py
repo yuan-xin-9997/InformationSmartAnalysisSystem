@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from collections.abc import Iterator
 
-from sqlalchemy import create_engine, event
+from sqlalchemy import create_engine, event, inspect, text
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
 from .config import settings
@@ -33,11 +33,28 @@ def _enable_sqlite_foreign_keys(dbapi_connection, _connection_record):
 SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
 
 
+def _ensure_column(engine_, table_name: str, column_name: str, column_ddl: str) -> None:
+    """Add a column to an existing table if missing (lightweight migration for
+    tables created before the column existed). No-op for missing tables
+    (create_all will build them fresh)."""
+    insp = inspect(engine_)
+    if not insp.has_table(table_name):
+        return
+    existing = {c["name"] for c in insp.get_columns(table_name)}
+    if column_name not in existing:
+        with engine_.begin() as conn:
+            conn.execute(
+                text(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {column_ddl}")
+            )
+
+
 def init_db() -> None:
     """Create all tables. Imports models so they register on ``Base``."""
     from .. import models  # noqa: F401  (registers ORM models)
 
     Base.metadata.create_all(bind=engine)
+    # Migrate pre-existing tables (create_all does not ALTER existing tables).
+    _ensure_column(engine, "task_runs", "scheduled_job_id", "INTEGER")
 
 
 def get_db() -> Iterator[Session]:
