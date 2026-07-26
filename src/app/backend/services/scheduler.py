@@ -30,6 +30,15 @@ _logger = get_logger("scheduler")
 _scheduler: BackgroundScheduler | None = None
 
 
+def get_scheduler() -> BackgroundScheduler | None:
+    """Return the process-wide scheduler (or None if not started).
+
+    Shared with push_scheduler so scheduled push rules register on the same
+    BackgroundScheduler with namespaced job ids (``push-{rule_id}``).
+    """
+    return _scheduler
+
+
 def _tz() -> ZoneInfo:
     return ZoneInfo(settings.timezone_display)
 

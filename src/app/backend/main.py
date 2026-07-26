@@ -29,6 +29,7 @@ from .core.security import sync_users_from_password_file
 from .core.timeutil import utcnow
 from .services import scheduler as sched_svc
 from .services import worker
+from .services.push import push_scheduler as push_sched_svc
 
 
 @asynccontextmanager
@@ -46,6 +47,7 @@ async def lifespan(app: FastAPI):
     with SessionLocal() as db:
         sync_users_from_password_file(db)
     sched_svc.start_scheduler()
+    push_sched_svc.start_push_scheduler()
     yield
     sched_svc.shutdown_scheduler()
     worker.shutdown()

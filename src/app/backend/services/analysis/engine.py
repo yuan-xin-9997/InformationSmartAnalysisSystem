@@ -14,6 +14,7 @@ from ...models.analysis import AnalysisResult, AnalysisTask, TaskSource
 from ...models.info_source import InfoItem
 from ...models.scheduled_job import ScheduledJob
 from ...models.task import TaskLog, TaskRun
+from ..push.service import on_analysis_completed
 from . import prompts as P
 from .llm_client import LLMClient, LLMError
 
@@ -174,3 +175,6 @@ def run_analysis(
                 if sj:
                     sj.last_run_status = "failed"
             db.commit()
+        else:
+            # 推送钩子：分析成功后触发 on_run 推送（异常隔离，不影响已成功的分析）
+            on_analysis_completed(task_id)

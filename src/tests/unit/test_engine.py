@@ -168,3 +168,45 @@ def test_run_analysis_no_writeback_for_manual_run(client, admin_headers, sync_wo
     r = client.post(f"/api/analysis-tasks/{tid}/run", json={"mode": "incremental"}, headers=admin_headers)
     assert r.status_code == 200
     # 不抛异常即视为通过(同步执行已完成)
+
+
+def test_engine_calls_push_hook_on_success(client, admin_headers, sync_worker, mock_llm, monkeypatch):
+    from app.backend.services.analysis import engine
+
+    called: list[int] = []
+    monkeypatch.setattr(engine, "on_analysis_completed", lambda tid: called.append(tid))
+    sid = _make_folder_source(client, admin_headers, {"a.txt": "内容A"})
+    tid = client.post(
+        "/api/analysis-tasks",
+        headers=admin_headers,
+        json={"name": "t", "config": {"mode": "per_item"}, "source_ids": [sid]},
+    ).json()["id"]
+    run = _run(client, admin_headers, tid, "incremental")
+    assert run["status"] == "succeeded"
+    assert called == [tid]
+
+
+def test_engine_no_push_hook_on_failure(client, admin_headers, sync_worker, monkeypatch):
+    from app.backend.services.analysis import engine
+
+    called: list[int] = []
+    monkeypatch.setattr(engine, "on_analysis_completed", lambda tid: called.append(tid))
+
+    class _Boom:
+        def __init__(self, *a, **kw):
+            pass
+
+        def chat(self, system, user):
+            raise RuntimeError("llm boom")
+
+    monkeypatch.setattr(engine, "LLMClient", _Boom)
+    sid = _make_folder_source(client, admin_headers, {"a.txt": "内容A"})
+    tid = client.post(
+        "/api/analysis-tasks",
+        headers=admin_headers,
+        json={"name": "t", "config": {"mode": "per_item"}, "source_ids": [sid]},
+    ).json()["id"]
+    r = client.post(f"/api/analysis-tasks/{tid}/run", headers=admin_headers, json={"mode": "incremental"})
+    run = client.get(f"/api/task-center/runs/{r.json()['run_id']}", headers=admin_headers).json()
+    assert run["status"] == "failed"
+    assert called == []  # 分析失败不触发推送钩子
