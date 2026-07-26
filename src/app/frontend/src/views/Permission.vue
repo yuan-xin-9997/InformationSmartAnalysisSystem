@@ -71,7 +71,7 @@ async function load() {
 function pageLabel(key: string) {
   const map: Record<string, string> = {
     dashboard: '概览', info_sources: '信息源', analysis_tasks: '分析任务',
-    analysis_result: '分析结果', task_center: '任务中心', permission: '权限管理', system_config: '系统配置',
+    task_center: '任务中心', permission: '权限管理', system_config: '系统配置',
   }
   return map[key] || key
 }

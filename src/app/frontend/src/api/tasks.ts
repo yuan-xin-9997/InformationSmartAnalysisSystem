@@ -69,10 +69,7 @@ export const runTaskApi = (id: number, mode: 'full' | 'incremental' | 'custom') 
 export const listTaskResultsApi = (taskId: number, runId?: number) =>
   request.get<unknown, AnalysisResult[]>(`/api/analysis-tasks/${taskId}/results`, { params: { run_id: runId } })
 
-export const listRunsApi = (params?: { kind?: string; status?: string; limit?: number }) =>
+export const listRunsApi = (params?: { kind?: string; ref_id?: number; status?: string; limit?: number }) =>
   request.get<unknown, TaskRun[]>('/api/task-center/runs', { params })
 export const getRunApi = (id: number) => request.get<unknown, TaskRunDetail>(`/api/task-center/runs/${id}`)
 export const deleteRunApi = (id: number) => request.delete<unknown, unknown>(`/api/task-center/runs/${id}`)
-
-export const listAllResultsApi = (params?: { run_id?: number; task_id?: number; limit?: number }) =>
-  request.get<unknown, AnalysisResult[]>('/api/analysis-results', { params })
