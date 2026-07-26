@@ -5,6 +5,7 @@ Importing each model module here registers it on ``Base.metadata`` so that
 """
 from .analysis import AnalysisResult, AnalysisTask, TaskSource
 from .info_source import InfoItem, InfoSource
+from .push import PushRule, PushRun, SmtpConfig, get_smtp_config_row
 from .scheduled_job import ScheduledJob
 from .task import TaskLog, TaskRun
 from .user import PagePermission, User
@@ -20,4 +21,8 @@ __all__ = [
     "TaskSource",
     "AnalysisResult",
     "ScheduledJob",
+    "PushRule",
+    "PushRun",
+    "SmtpConfig",
+    "get_smtp_config_row",
 ]
