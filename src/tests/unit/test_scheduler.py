@@ -32,7 +32,7 @@ def test_fire_creates_task_run_and_submits(client, admin_headers, sync_worker, m
         assert run.mode == "incremental"
         assert run.status == "succeeded"  # sync_worker + mock_llm 已执行
         job = db.get(ScheduledJob, jid)
-        assert job.last_run_status == "running"  # _fire 置 running;终态回写由 B6 的 engine.py 负责
+        assert job.last_run_status == "succeeded"  # 定时触发链路终态由 engine.py 回写
         assert job.last_run_at is not None
     assert submitted and submitted[0][0] == "run_analysis"
 

@@ -12,6 +12,7 @@ from ...core.logging import get_logger
 from ...core.timeutil import utcnow
 from ...models.analysis import AnalysisResult, AnalysisTask, TaskSource
 from ...models.info_source import InfoItem
+from ...models.scheduled_job import ScheduledJob
 from ...models.task import TaskLog, TaskRun
 from . import prompts as P
 from .llm_client import LLMClient, LLMError
@@ -157,6 +158,10 @@ def run_analysis(
             run.finished_at = utcnow()
             run.summary = f"分析完成: 处理 {total_items} 条信息, 生成 {total_results} 条结果"
             _log(db, run_id, "INFO", run.summary)
+            if run.scheduled_job_id:
+                sj = db.get(ScheduledJob, run.scheduled_job_id)
+                if sj:
+                    sj.last_run_status = "succeeded"
             db.commit()
         except Exception as exc:  # noqa: BLE001
             _logger.exception("分析任务失败: %s", task.name)
@@ -164,4 +169,8 @@ def run_analysis(
             run.error = str(exc)
             run.finished_at = utcnow()
             _log(db, run_id, "ERROR", f"分析失败: {exc}")
+            if run.scheduled_job_id:
+                sj = db.get(ScheduledJob, run.scheduled_job_id)
+                if sj:
+                    sj.last_run_status = "failed"
             db.commit()
