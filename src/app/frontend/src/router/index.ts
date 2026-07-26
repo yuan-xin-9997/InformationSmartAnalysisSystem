@@ -16,6 +16,7 @@ const routes: RouteRecordRaw[] = [
       { path: 'dashboard', component: () => import('@/views/Dashboard.vue'), meta: { page: 'dashboard', title: '概览' } },
       { path: 'info-sources', component: () => import('@/views/InfoSources.vue'), meta: { page: 'info_sources', title: '信息源管理' } },
       { path: 'analysis-tasks', component: () => import('@/views/AnalysisTasks.vue'), meta: { page: 'analysis_tasks', title: '分析任务' } },
+      { path: 'scheduled-jobs', component: () => import('@/views/ScheduledJobs.vue'), meta: { page: 'scheduled_jobs', title: '定时任务' } },
       { path: 'analysis-tasks/:id/results', name: 'task-results', component: () => import('@/views/TaskResults.vue'), meta: { page: 'analysis_tasks', title: '分析结果' } },
       { path: 'task-center', component: () => import('@/views/TaskCenter.vue'), meta: { page: 'task_center', title: '任务中心' } },
       { path: 'permission', component: () => import('@/views/Permission.vue'), meta: { page: 'permission', title: '权限管理' } },
