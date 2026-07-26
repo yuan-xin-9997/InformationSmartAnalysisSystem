@@ -40,11 +40,10 @@ if [ ! -x "$PYTHON" ]; then
   echo "创建虚拟环境 $VENV ..."
   python3 -m venv "$VENV"
 fi
-if ! "$PYTHON" -c "import fastapi" >/dev/null 2>&1; then
-  echo "安装后端依赖 ..."
-  "$PYTHON" -m pip install --upgrade pip -q
-  "$PYTHON" -m pip install -r "$SCRIPT_DIR/app/backend/requirements.txt" -q
-fi
+# 同步后端依赖(增量;pip 已装包会跳过,确保新增依赖如 apscheduler 被装上)
+echo "同步后端依赖 ..."
+"$PYTHON" -m pip install --upgrade pip -q
+"$PYTHON" -m pip install -r "$SCRIPT_DIR/app/backend/requirements.txt" -q
 
 # 前端构建（dist 不存在且 npm 可用时）
 if [ ! -d "$SCRIPT_DIR/app/frontend/dist" ] && command -v npm >/dev/null 2>&1; then
