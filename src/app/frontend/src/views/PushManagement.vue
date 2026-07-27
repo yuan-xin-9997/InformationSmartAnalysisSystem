@@ -145,9 +145,13 @@
       <label>密码<input v-model.trim="smtp.password" type="password" placeholder="留空表示不修改" /></label>
       <label>发件人邮箱<input v-model.trim="smtp.from_email" placeholder="noreply@example.com" /></label>
       <label>发件人名称<input v-model.trim="smtp.from_name" /></label>
+      <label>测试收件人邮箱<input v-model.trim="testTo" placeholder="用于下方「发送测试邮件」" /></label>
     </div>
     <p class="meta" style="margin-top:6px">
       当前生效来源：{{ smtpSource }}。密码为空保存时保留原密码；页面配置优先于 config/app.json 的 email 段。
+    </p>
+    <p class="meta" style="margin-top:4px">
+      此处仅配置发件服务器与发件人；<b>实际推送的收件人在每条推送规则中配置</b>（新建/编辑规则时的「收件人邮箱」）。上方「测试收件人邮箱」仅用于发送测试邮件。
     </p>
   </div>
 </template>
@@ -194,6 +198,7 @@ const smtp = reactive({
   from_name: '信息智能分析系统',
 })
 const smtpSource = ref('加载中…')
+const testTo = ref('')
 
 onMounted(async () => {
   tasks.value = await listTasksApi()
@@ -347,9 +352,12 @@ async function onSaveSmtp() {
 }
 
 async function onTestSmtp() {
-  const to = prompt('请输入测试收件人邮箱：')
-  if (!to) return
-  const res = await testSmtpApi(to.trim())
+  const to = testTo.value.trim()
+  if (!to) {
+    showToast('请先在上方填写「测试收件人邮箱」')
+    return
+  }
+  const res = await testSmtpApi(to)
   showToast(res.ok ? '测试邮件发送成功' : `发送失败：${res.error}`)
 }
 </script>
