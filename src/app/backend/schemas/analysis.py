@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from .common import BeijingDatetime, ORMBase
+from .info_source import SourceFileOut
 
 
 class AnalysisTaskOut(ORMBase):
@@ -55,3 +56,5 @@ class AnalysisResultOut(ORMBase):
     result_type: str
     content: str
     created_at: BeijingDatetime
+    # per_item 结果携带来源文件信息；aggregate 结果为 None。
+    source_file: SourceFileOut | None = None

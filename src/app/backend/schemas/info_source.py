@@ -51,6 +51,34 @@ class InfoItemOut(InfoItemBrief):
     content: str
 
 
+class InfoItemFigureOut(ORMBase):
+    """A figure belonging to an InfoItem, as returned by the results API."""
+
+    index: int            # corresponds to InfoItemFigure.figure_index
+    url: str              # /api/info-sources/{source_id}/items/{item_id}/figures/{index}
+    mime: str | None
+    width: int | None
+    height: int | None
+
+
+class SourceFileOut(ORMBase):
+    """Source-file info attached to a per_item analysis result.
+
+    Lets the result page render file/metadata/figures in one fetch.
+    `aggregate` results have no single file, so their ``source_file`` is null.
+    """
+
+    filename: str                 # InfoItem.title (local_folder: filename)
+    file_path: str                # InfoItem.external_id (resolved absolute path)
+    title: str                    # InfoItem.title
+    author: str | None
+    author_affiliation: str | None
+    published_at: BeijingDatetime | None
+    page_count: int | None
+    file_url: str                 # /api/info-sources/{source_id}/items/{item_id}/file
+    figures: list[InfoItemFigureOut] = []
+
+
 class ItemsQueryRequest(ORMBase):
     source_ids: list[int]
     limit: int = 50

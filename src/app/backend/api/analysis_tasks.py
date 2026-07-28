@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 from ..core.database import get_db
 from ..core.deps import require_page
 from ..models.analysis import AnalysisResult, AnalysisTask, TaskSource
-from ..models.info_source import InfoSource
+from ..models.info_source import InfoItem, InfoItemFigure, InfoSource
 from ..models.task import TaskRun
 from ..models.user import User
 from ..schemas.analysis import (
@@ -20,6 +20,7 @@ from ..schemas.analysis import (
     RunAnalysisRequest,
     TaskSourceOut,
 )
+from ..schemas.info_source import InfoItemFigureOut, SourceFileOut
 from ..services import worker
 from ..services.analysis import run_analysis
 
@@ -199,11 +200,61 @@ def list_task_results(
     if run_id:
         q = q.where(AnalysisResult.task_run_id == run_id)
     results = db.scalars(q).all()
-    return [_result_out(db, r) for r in results]
+
+    # Batch-prefetch InfoItem + InfoItemFigure to avoid N+1 (one query each).
+    item_ids = {r.info_item_id for r in results if r.info_item_id}
+    items_map: dict[int, InfoItem] = {}
+    figs_by_item: dict[int, list[InfoItemFigure]] = {}
+    if item_ids:
+        items_map = {
+            it.id: it
+            for it in db.scalars(
+                select(InfoItem).where(InfoItem.id.in_(item_ids))
+            ).all()
+        }
+        figs = db.scalars(
+            select(InfoItemFigure)
+            .where(InfoItemFigure.item_id.in_(item_ids))
+            .order_by(InfoItemFigure.item_id, InfoItemFigure.figure_index)
+        ).all()
+        for f in figs:
+            figs_by_item.setdefault(f.item_id, []).append(f)
+
+    return [_result_out(db, r, items_map, figs_by_item) for r in results]
 
 
-def _result_out(db: Session, r: AnalysisResult) -> AnalysisResultOut:
+def _result_out(
+    db: Session,
+    r: AnalysisResult,
+    items_map: dict[int, InfoItem],
+    figs_by_item: dict[int, list[InfoItemFigure]],
+) -> AnalysisResultOut:
     src = db.get(InfoSource, r.source_id) if r.source_id else None
+    source_file: SourceFileOut | None = None
+    if r.info_item_id and r.source_id:
+        item = items_map.get(r.info_item_id)
+        if item is not None:
+            figs = figs_by_item.get(item.id, [])
+            source_file = SourceFileOut(
+                filename=item.title,
+                file_path=item.external_id,
+                title=item.title,
+                author=item.author,
+                author_affiliation=item.author_affiliation,
+                published_at=item.article_published_at,
+                page_count=item.page_count,
+                file_url=f"/api/info-sources/{r.source_id}/items/{item.id}/file",
+                figures=[
+                    InfoItemFigureOut(
+                        index=f.figure_index,
+                        url=f"/api/info-sources/{r.source_id}/items/{item.id}/figures/{f.figure_index}",
+                        mime=f.mime,
+                        width=f.width,
+                        height=f.height,
+                    )
+                    for f in figs
+                ],
+            )
     return AnalysisResultOut(
         id=r.id,
         task_run_id=r.task_run_id,
@@ -214,4 +265,5 @@ def _result_out(db: Session, r: AnalysisResult) -> AnalysisResultOut:
         result_type=r.result_type,
         content=r.content,
         created_at=r.created_at,
+        source_file=source_file,
     )
