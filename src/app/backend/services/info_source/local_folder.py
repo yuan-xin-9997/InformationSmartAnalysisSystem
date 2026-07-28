@@ -238,10 +238,13 @@ def _first_page_text(path: Path) -> str | None:
 # ---------- figure extraction ----------
 
 
-def extract_figures(path: Path, max_count: int) -> list[FigureData]:
+def extract_figures(path: Path, max_count: int) -> tuple[list[FigureData], bool]:
     """Extract embedded images as ``FigureData`` (bytes only, no disk writes).
 
-    Returns at most ``max_count`` items. For txt/md/html returns ``[]``.
+    Returns ``(figures, truncated)``: at most ``max_count`` items, plus a flag
+    that is ``True`` when more image candidates existed but were dropped due to
+    the cap. For txt/md/html returns ``([], False)``. ``max_count=0`` yields
+    ``([], True)`` when the file contains at least one image candidate.
     """
     suffix = path.suffix.lower()
     try:
@@ -251,11 +254,11 @@ def extract_figures(path: Path, max_count: int) -> list[FigureData]:
             return _figures_docx(path, max_count)
     except Exception:
         _logger.warning("抽取图表失败: %s", path, exc_info=True)
-        return []
-    return []
+        return [], False
+    return [], False
 
 
-def _figures_pdf(path: Path, max_count: int) -> list[FigureData]:
+def _figures_pdf(path: Path, max_count: int) -> tuple[list[FigureData], bool]:
     import fitz
 
     figures: list[FigureData] = []
@@ -263,6 +266,10 @@ def _figures_pdf(path: Path, max_count: int) -> list[FigureData]:
     with fitz.open(path) as doc:
         for page in doc:
             for img in page.get_images(full=True):
+                # Check the cap BEFORE appending so max_count=0 returns [] and
+                # we never overshoot by one.
+                if len(figures) >= max_count:
+                    return figures, True  # truncated: another candidate remains
                 xref = img[0]
                 if xref in seen_xrefs:
                     continue
@@ -276,17 +283,17 @@ def _figures_pdf(path: Path, max_count: int) -> list[FigureData]:
                     continue
                 ext = (info.get("ext") or "bin").lower()
                 figures.append(_make_figure_data(data, ext))
-                if len(figures) >= max_count:
-                    return figures
-    return figures
+    return figures, False
 
 
-def _figures_docx(path: Path, max_count: int) -> list[FigureData]:
+def _figures_docx(path: Path, max_count: int) -> tuple[list[FigureData], bool]:
     import docx
 
     document = docx.Document(str(path))
     figures: list[FigureData] = []
     for rel in document.part.rels.values():
+        if len(figures) >= max_count:
+            return figures, True  # truncated: another candidate remains
         if rel.is_external:
             continue
         try:
@@ -298,9 +305,7 @@ def _figures_docx(path: Path, max_count: int) -> list[FigureData]:
             continue
         ext = content_type.split("/")[-1].lower()
         figures.append(_make_figure_data(blob, ext, mime=content_type))
-        if len(figures) >= max_count:
-            break
-    return figures
+    return figures, False
 
 
 def _make_figure_data(data: bytes, ext: str, mime: str | None = None) -> FigureData:
@@ -385,10 +390,10 @@ def _extract_full(path: Path) -> InfoItemData | None:
     metadata = extract_metadata(path)
     first_page = _first_page_text(path)
     affiliation = extract_author_affiliation(first_page)
-    figures = extract_figures(path, settings.max_figures_per_item)
-    if len(figures) >= settings.max_figures_per_item:
+    figures, truncated = extract_figures(path, settings.max_figures_per_item)
+    if truncated:
         _logger.warning(
-            "图表数达到上限 %d，可能已截断: %s", settings.max_figures_per_item, path
+            "图表数达到上限 %d，已截断: %s", settings.max_figures_per_item, path
         )
     title = metadata.get("title") or path.name
     mtime = datetime.fromtimestamp(path.stat().st_mtime, tz=timezone.utc)

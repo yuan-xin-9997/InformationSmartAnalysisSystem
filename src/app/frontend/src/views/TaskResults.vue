@@ -63,14 +63,22 @@
                     <div v-if="r.source_file.figures.length" class="figure-gallery">
                       <p class="eyebrow" style="margin-top:12px">图表（{{ r.source_file.figures.length }}）</p>
                       <div class="figure-row">
-                        <img
-                          v-for="(url, idx) in figureUrlsByResult[r.id] || []"
-                          :key="idx"
-                          :src="url"
-                          class="figure-thumb"
-                          :alt="`图表 ${idx + 1}`"
-                          @click="openFigureViewer(url)"
-                        />
+                        <template v-for="(url, idx) in figureUrlsByResult[r.id] || []" :key="idx">
+                          <img
+                            v-if="url"
+                            :src="url"
+                            class="figure-thumb"
+                            :alt="`图表 ${idx + 1}`"
+                            @click="openFigureViewer(url)"
+                          />
+                          <div
+                            v-else
+                            class="figure-thumb figure-thumb-error"
+                            :title="`图表 ${idx + 1} 加载失败`"
+                          >
+                            <span>图表 {{ idx + 1 }}<br />加载失败</span>
+                          </div>
+                        </template>
                         <span v-if="!figureUrlsByResult[r.id] && figureLoading[r.id]" class="muted" style="font-size:12px">图表加载中...</span>
                         <span v-if="figureError[r.id]" class="error" style="font-size:12px">图表加载失败</span>
                       </div>
@@ -151,8 +159,9 @@ const expandedRun = ref<number | null>(null)
 const resultsByRun = reactive<Record<number, AnalysisResult[] | undefined>>({})
 const renderMd = renderMarkdown
 
-// 图表 blob URL 缓存：resultId -> 与 r.source_file.figures 顺序对齐的 objectURL 数组
-const figureUrlsByResult = reactive<Record<number, string[]>>({})
+// 图表 blob URL 缓存：resultId -> 与 r.source_file.figures 顺序对齐的数组
+// （成功位为 objectURL，失败位为 null，保持原始 figure index 对齐）
+const figureUrlsByResult = reactive<Record<number, (string | null)[]>>({})
 const figureLoading = reactive<Record<number, boolean>>({})
 const figureError = reactive<Record<number, boolean>>({})
 // 图表大图查看器（复用缓存中的 URL，关闭时不 revoke，由缓存统一管理）
@@ -185,7 +194,9 @@ onBeforeUnmount(() => {
   closePreview()
   figureViewerUrl.value = null
   for (const key of Object.keys(figureUrlsByResult)) {
-    for (const u of figureUrlsByResult[Number(key)]) URL.revokeObjectURL(u)
+    for (const u of figureUrlsByResult[Number(key)]) {
+      if (u) URL.revokeObjectURL(u)
+    }
   }
 })
 
@@ -203,6 +214,18 @@ async function load() {
 }
 
 async function loadRuns() {
+  // 切换任务/刷新：清理上一批结果的图表 blob URL，避免内存泄漏。
+  // figureViewerUrl 复用缓存中的 URL，需一并关闭以免悬挂引用已 revoke 的 URL。
+  figureViewerUrl.value = null
+  for (const key of Object.keys(figureUrlsByResult)) {
+    for (const u of figureUrlsByResult[Number(key)]) {
+      if (u) URL.revokeObjectURL(u)
+    }
+    delete figureUrlsByResult[Number(key)]
+  }
+  for (const key of Object.keys(figureLoading)) delete figureLoading[Number(key)]
+  for (const key of Object.keys(figureError)) delete figureError[Number(key)]
+  for (const key of Object.keys(resultsByRun)) delete resultsByRun[Number(key)]
   runs.value = await listRunsApi({ kind: 'analysis', ref_id: taskId.value, limit: 200 })
   expandedRun.value = null
 }
@@ -237,23 +260,21 @@ async function onResultToggle(r: AnalysisResult, e: Event) {
   figureLoading[r.id] = true
   figureError[r.id] = false
   try {
+    // 稀疏数组：按 figure 原始 index 对齐。失败位为 null，保留位置，避免
+    // 模板中 idx 与 figure.index 错位（I-1），并让单图失败可单独提示（I-3）。
     const results = await Promise.allSettled(
       sf.figures.map((fig) =>
         getFigureBlobApi(sourceId, itemId, fig.index).then((b) => URL.createObjectURL(b)),
       ),
     )
-    const urls: string[] = []
-    let failCount = 0
-    results.forEach((res, i) => {
-      if (res.status === 'fulfilled') {
-        urls.push(res.value)
-      } else {
-        failCount++
-        console.error('图表加载失败', sf.figures[i], res.reason)
-      }
+    const urls: (string | null)[] = results.map((res, i) => {
+      if (res.status === 'fulfilled') return res.value
+      console.error('图表加载失败', sf.figures[i], res.reason)
+      return null
     })
     figureUrlsByResult[r.id] = urls
-    if (failCount && !urls.length) figureError[r.id] = true
+    // 整体失败标志：仅当所有图都失败时显示整体错误（保留旧行为语义）
+    if (urls.length && !urls.some((u) => u !== null)) figureError[r.id] = true
   } finally {
     figureLoading[r.id] = false
   }

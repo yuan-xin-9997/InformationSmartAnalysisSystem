@@ -262,8 +262,9 @@ def test_extract_figures_pdf_multiple(tmp_path):
     img3.write_bytes(_make_png(6, 7))
     pdf = tmp_path / "a.pdf"
     _make_pdf(pdf, image_paths=[img1, img2, img3])
-    figs = extract_figures(pdf, max_count=20)
+    figs, truncated = extract_figures(pdf, max_count=20)
     assert len(figs) == 3
+    assert truncated is False  # 3 images < cap 20 -> not truncated
     assert all(f.bytes_data for f in figs)
     # width/height parsed from PNG header (order may vary by xref)
     dims = sorted((f.width, f.height) for f in figs)
@@ -278,8 +279,9 @@ def test_extract_figures_pdf_none(tmp_path):
 
     pdf = tmp_path / "a.pdf"
     _make_pdf(pdf)
-    figs = extract_figures(pdf, max_count=20)
+    figs, truncated = extract_figures(pdf, max_count=20)
     assert figs == []
+    assert truncated is False
 
 
 def test_extract_figures_pdf_truncate(tmp_path):
@@ -293,8 +295,33 @@ def test_extract_figures_pdf_truncate(tmp_path):
     img3.write_bytes(_make_png(6, 7))
     pdf = tmp_path / "a.pdf"
     _make_pdf(pdf, image_paths=[img1, img2, img3])
-    figs = extract_figures(pdf, max_count=2)
+    figs, truncated = extract_figures(pdf, max_count=2)
     assert len(figs) == 2
+    assert truncated is True  # a 3rd image candidate was dropped
+
+
+def test_extract_figures_pdf_max_count_zero(tmp_path):
+    """max_count=0 must return [] (not 1) and flag truncation when images exist."""
+    from app.backend.services.info_source.local_folder import extract_figures
+
+    img = tmp_path / "i1.png"
+    img.write_bytes(_make_png(2, 3))
+    pdf = tmp_path / "a.pdf"
+    _make_pdf(pdf, image_paths=[img])
+    figs, truncated = extract_figures(pdf, max_count=0)
+    assert figs == []
+    assert truncated is True  # image candidate dropped due to cap=0
+
+
+def test_extract_figures_pdf_max_count_zero_no_images(tmp_path):
+    """max_count=0 on an image-less PDF -> ([], False) (nothing to drop)."""
+    from app.backend.services.info_source.local_folder import extract_figures
+
+    pdf = tmp_path / "a.pdf"
+    _make_pdf(pdf)
+    figs, truncated = extract_figures(pdf, max_count=0)
+    assert figs == []
+    assert truncated is False
 
 
 def test_extract_figures_docx(tmp_path):
@@ -304,8 +331,9 @@ def test_extract_figures_docx(tmp_path):
     img.write_bytes(_make_png(4, 5))
     docx_path = tmp_path / "a.docx"
     _make_docx(docx_path, image_paths=[img])
-    figs = extract_figures(docx_path, max_count=20)
+    figs, truncated = extract_figures(docx_path, max_count=20)
     assert len(figs) == 1
+    assert truncated is False
     assert figs[0].width == 4
     assert figs[0].height == 5
     assert figs[0].mime == "image/png"
@@ -316,7 +344,9 @@ def test_extract_figures_txt_empty(tmp_path):
 
     txt = tmp_path / "a.txt"
     txt.write_text("hello", encoding="utf-8")
-    assert extract_figures(txt, max_count=20) == []
+    figs, truncated = extract_figures(txt, max_count=20)
+    assert figs == []
+    assert truncated is False
 
 
 def test_extract_figures_html_empty(tmp_path):
@@ -324,7 +354,9 @@ def test_extract_figures_html_empty(tmp_path):
 
     html = tmp_path / "a.html"
     html.write_text("<html><body><p>hi</p></body></html>", encoding="utf-8")
-    assert extract_figures(html, max_count=20) == []
+    figs, truncated = extract_figures(html, max_count=20)
+    assert figs == []
+    assert truncated is False
 
 
 # ---------- _extract_full ----------
@@ -490,8 +522,9 @@ def test_extract_figures_logs_warning_on_corrupted_pdf(tmp_path, caplog):
     pdf = tmp_path / "broken.pdf"
     pdf.write_bytes(b"not a real pdf")
     with caplog.at_level(logging.WARNING, logger="local_folder"):
-        figs = extract_figures(pdf, max_count=10)
+        figs, truncated = extract_figures(pdf, max_count=10)
     assert figs == []
+    assert truncated is False
     assert any(
         r.levelno == logging.WARNING and "抽取图表失败" in r.getMessage()
         for r in caplog.records

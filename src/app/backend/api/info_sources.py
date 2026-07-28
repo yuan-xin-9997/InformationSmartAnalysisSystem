@@ -303,7 +303,13 @@ def get_item_file(
         )
 
     file_path = Path(item.external_id)
-    folder_root = Path(src.config["folder_path"]).resolve()
+    folder_root_raw = src.config.get("folder_path")
+    if not folder_root_raw:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="该信息源未配置 folder_path",
+        )
+    folder_root = Path(folder_root_raw).resolve()
     resolved = file_path.resolve()
     # Path-traversal defense: the file must live under the source's folder_path.
     if not resolved.is_relative_to(folder_root):

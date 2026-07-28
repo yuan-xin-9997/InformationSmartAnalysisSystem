@@ -344,6 +344,37 @@ def test_get_file_item_not_found_404(client, admin_headers, tmp_path):
     assert r.status_code == 404
 
 
+def test_get_file_missing_folder_path_config_404(client, admin_headers, tmp_path):
+    """local_folder source whose config lacks folder_path -> 404 (not 500). (I-6)"""
+    from app.backend.core.database import SessionLocal
+    from app.backend.models.info_source import InfoItem, InfoSource
+
+    folder = tmp_path / "folder"
+    folder.mkdir()
+    pdf = folder / "a.pdf"
+    _make_pdf(pdf)
+
+    with SessionLocal() as db:
+        src = InfoSource(name="s", type="local_folder", config={})  # no folder_path
+        db.add(src)
+        db.commit()
+        db.refresh(src)
+        src_id = src.id
+        item = InfoItem(
+            source_id=src_id, external_id=str(pdf.resolve()), title="a.pdf", content="c"
+        )
+        db.add(item)
+        db.commit()
+        db.refresh(item)
+        item_id = item.id
+
+    r = client.get(
+        f"/api/info-sources/{src_id}/items/{item_id}/file", headers=admin_headers
+    )
+    assert r.status_code == 404, r.text
+    assert "folder_path" in r.text
+
+
 def test_get_file_without_auth_401(client, tmp_path):
     """No token -> 401."""
     r = client.get("/api/info-sources/1/items/1/file")
@@ -354,7 +385,11 @@ def test_get_file_without_auth_401(client, tmp_path):
 
 
 def test_get_figure_by_index(client, admin_headers, tmp_path):
-    """GET figures/{index}: 200 + correct MIME."""
+    """GET figures/{index}: 200 + correct bytes for each of multiple figures.
+
+    Seeds two figures (index 0 and 1) with distinct bytes and asserts each
+    endpoint returns its own bytes -- proving index alignment (I-4).
+    """
     from app.backend.core.config import settings
     from app.backend.core.database import SessionLocal
 
@@ -365,21 +400,39 @@ def test_get_figure_by_index(client, admin_headers, tmp_path):
 
     fig_dir = settings.figures_dir / "2026/01/01"
     fig_dir.mkdir(parents=True, exist_ok=True)
-    fig_file = fig_dir / "1_0.png"
-    fig_file.write_bytes(_make_png(3, 4))
+    # two distinct figures so the served bytes can be told apart by index
+    fig0_bytes = _make_png(3, 4, color=(255, 0, 0))
+    fig1_bytes = _make_png(5, 6, color=(0, 0, 255))
+    assert fig0_bytes != fig1_bytes  # sanity
+    fig0 = fig_dir / "1_0.png"
+    fig1 = fig_dir / "1_1.png"
+    fig0.write_bytes(fig0_bytes)
+    fig1.write_bytes(fig1_bytes)
 
     with SessionLocal() as db:
         src_id = _seed_source(db, folder)
         item_id = _seed_item(db, src_id, str(pdf.resolve()), title="doc.pdf")
-        _seed_figure(db, item_id, str(fig_file.resolve()), mime="image/png", index=0)
+        _seed_figure(db, item_id, str(fig0.resolve()), mime="image/png", index=0)
+        _seed_figure(db, item_id, str(fig1.resolve()), mime="image/png", index=1)
 
-    r = client.get(
+    # figure 0
+    r0 = client.get(
         f"/api/info-sources/{src_id}/items/{item_id}/figures/0",
         headers=admin_headers,
     )
-    assert r.status_code == 200, r.text
-    assert r.headers["content-type"] == "image/png"
-    assert len(r.content) > 0
+    assert r0.status_code == 200, r0.text
+    assert r0.headers["content-type"] == "image/png"
+    assert r0.content == fig0_bytes
+
+    # figure 1 (distinct bytes -> proves index alignment, not always returning figure 0)
+    r1 = client.get(
+        f"/api/info-sources/{src_id}/items/{item_id}/figures/1",
+        headers=admin_headers,
+    )
+    assert r1.status_code == 200, r1.text
+    assert r1.headers["content-type"] == "image/png"
+    assert r1.content == fig1_bytes
+    assert r1.content != r0.content
 
 
 def test_get_figure_nonexistent_index_404(client, admin_headers, tmp_path):
