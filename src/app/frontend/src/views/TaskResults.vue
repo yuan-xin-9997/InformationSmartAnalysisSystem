@@ -301,9 +301,11 @@ async function openPreview(r: AnalysisResult) {
   try {
     if (kind === 'pdf') {
       const blob = await getFileBlobApi(sourceId, itemId)
+      if (preview.value !== p) return // 已关闭/替换，丢弃结果，blob 由 GC 回收，避免泄漏 blobUrl
       p.blobUrl = URL.createObjectURL(blob)
     } else if (kind === 'docx') {
       const blob = await getFileBlobApi(sourceId, itemId)
+      if (preview.value !== p) return // 已关闭/替换，不触发下载、不取 content
       const url = URL.createObjectURL(blob)
       const a = document.createElement('a')
       a.href = url
@@ -314,21 +316,29 @@ async function openPreview(r: AnalysisResult) {
       URL.revokeObjectURL(url)
       try {
         const item = await getItemApi(sourceId, itemId)
+        if (preview.value !== p) return // 已关闭/替换，不写 itemContent 到 detached 代理
         p.itemContent = item.content || ''
       } catch {
         p.itemContent = ''
       }
     } else if (kind === 'html') {
       const blob = await getFileBlobApi(sourceId, itemId)
+      if (preview.value !== p) return
       const text = await blob.text()
+      if (preview.value !== p) return
       p.html = DOMPurify.sanitize(text)
     } else if (kind === 'md') {
       const blob = await getFileBlobApi(sourceId, itemId)
+      if (preview.value !== p) return
       const text = await blob.text()
+      if (preview.value !== p) return
       p.html = renderMarkdown(text)
     } else if (kind === 'txt') {
       const blob = await getFileBlobApi(sourceId, itemId)
-      p.text = await blob.text()
+      if (preview.value !== p) return
+      const text = await blob.text()
+      if (preview.value !== p) return
+      p.text = text
     }
     // unknown: 无操作，弹层显示「不支持预览此文件类型」
   } catch (err) {
