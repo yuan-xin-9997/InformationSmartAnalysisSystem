@@ -65,6 +65,18 @@ export const countItemsApi = (
 export const getItemApi = (sourceId: number, itemId: number) =>
   request.get<unknown, InfoItem>(`/api/info-sources/${sourceId}/items/${itemId}`)
 
+/** 下载/预览 InfoItem 的源文件（PDF 内嵌 / docx 下载 / html·txt·md 文本）。鉴权头由 request 拦截器自动附加。 */
+export const getFileBlobApi = (sourceId: number, itemId: number) =>
+  request.get<unknown, Blob>(`/api/info-sources/${sourceId}/items/${itemId}/file`, { responseType: 'blob' })
+
+/** 取某张图表的二进制（用于 <img> 缩略图/大图）。鉴权头由 request 拦截器自动附加。 */
+export const getFigureBlobApi = (sourceId: number, itemId: number, index: number) =>
+  request.get<unknown, Blob>(`/api/info-sources/${sourceId}/items/${itemId}/figures/${index}`, { responseType: 'blob' })
+
+/** 手动重新抽取某 InfoItem 的元数据与图表。 */
+export const reextractItemApi = (sourceId: number, itemId: number) =>
+  request.post<unknown, { item_id: number; updated: boolean }>(`/api/info-sources/${sourceId}/items/${itemId}/reextract`)
+
 export interface ItemsQueryResp {
   items: InfoItemBrief[]
   total: number

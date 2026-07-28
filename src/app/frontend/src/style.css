@@ -11,3 +11,18 @@
 .markdown hr{border:0;border-top:1px solid #e4e8f0;margin:14px 0}
 .markdown table{width:100%;border-collapse:collapse;margin:10px 0;font-size:13px}.markdown th,.markdown td{border:1px solid #e1e5ee;padding:7px 10px;text-align:left}.markdown th{background:#f5f7fa}
 .markdown a{color:#4263cf;text-decoration:none}
+/* 分析结果页三段式与预览（任务5） */
+.result-section{margin-top:14px;padding-top:6px}
+.result-section:first-child{margin-top:4px}
+.file-info-row{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.link-button{background:transparent;border:0;color:#4263cf;padding:0;cursor:pointer;font-size:13px;font-weight:650;text-decoration:underline}
+.link-button:hover{color:#3553c0}
+.file-path{font-size:12px;word-break:break-all;max-width:100%}
+.figure-gallery{margin-top:4px}
+.figure-row{display:flex;gap:8px;flex-wrap:wrap;margin-top:6px;align-items:center}
+.figure-thumb{width:120px;height:120px;object-fit:cover;cursor:pointer;border:1px solid #e1e5ee;border-radius:8px;background:#f5f7fa;transition:transform .12s,box-shadow .12s}
+.figure-thumb:hover{transform:translateY(-1px);box-shadow:0 4px 12px #24305422}
+.modal-card.preview-card{width:min(1100px,96vw);max-height:92vh;display:flex;flex-direction:column;padding:18px}
+.preview-body{margin-top:14px;flex:1;min-height:0;overflow:auto}
+.preview-iframe{width:100%;height:78vh;border:1px solid #e1e5ee;border-radius:9px;background:#f5f7fa}
+.figure-large{max-width:90vw;max-height:80vh;border-radius:8px;object-fit:contain}

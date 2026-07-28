@@ -23,6 +23,26 @@ export interface AnalysisTaskDetail extends AnalysisTask {
   sources: TaskSourceOut[]
 }
 
+export interface InfoItemFigureOut {
+  index: number
+  url: string
+  mime: string | null
+  width: number | null
+  height: number | null
+}
+
+export interface SourceFileOut {
+  filename: string
+  file_path: string
+  title: string
+  author: string | null
+  author_affiliation: string | null
+  published_at: string | null
+  page_count: number | null
+  file_url: string
+  figures: InfoItemFigureOut[]
+}
+
 export interface AnalysisResult {
   id: number
   task_run_id: number
@@ -33,6 +53,7 @@ export interface AnalysisResult {
   result_type: string
   content: string
   created_at: string
+  source_file: SourceFileOut | null
 }
 
 export interface TaskRun {
