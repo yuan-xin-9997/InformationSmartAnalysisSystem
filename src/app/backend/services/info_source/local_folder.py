@@ -1,12 +1,37 @@
-"""Local-folder information-source adapter."""
+"""Local-folder information-source adapter.
+
+Extracts plain text, article metadata (title/author/affiliation/published_at/
+page_count) and embedded figures from local files (txt/md/html/pdf/docx).
+``extract_figures`` returns raw bytes only -- ``sync.py`` owns disk persistence
+(it has ``settings.figures_dir`` and the ``item_id``).
+"""
 from __future__ import annotations
 
-from datetime import datetime, timezone
+import re
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from bs4 import BeautifulSoup
 
-from .base import InfoItemData, InfoSourceAdapter, SourceStatus
+from ...core.config import settings
+from ...core.logging import get_logger
+from .base import FigureData, InfoItemData, InfoSourceAdapter, SourceStatus
+
+_logger = get_logger("local_folder")
+
+# Institutional keywords for author-affiliation line matching.
+_AFFILIATION_RE = re.compile(
+    r"(大学|学院|研究所|研究院|公司|实验室|医院|中心|科学院|工程院|"
+    r"Department|University|Institute|Lab|College|Hospital|Corporation|Inc)"
+)
+
+# PDF date: D:YYYYMMDDHHmmSS[+TZ'HH'mm]
+_PDF_DATE_RE = re.compile(
+    r"D:(\d{4})(\d{2})(\d{2})(\d{2})?(\d{2})?(\d{2})?([+-]\d{2})?'?(\d{2})?'?"
+)
+
+
+# ---------- text extraction ----------
 
 
 def extract_text(path: Path) -> str | None:
@@ -42,6 +67,345 @@ def _extract_docx(path: Path) -> str:
 
     doc = docx.Document(str(path))
     return "\n".join(p.text for p in doc.paragraphs).strip()
+
+
+# ---------- metadata extraction ----------
+
+
+def extract_metadata(path: Path) -> dict:
+    """Return ``{"title", "author", "published_at", "page_count"}``.
+
+    Values are ``None`` when not derivable. For txt/md all are ``None``.
+    """
+    suffix = path.suffix.lower()
+    try:
+        if suffix == ".pdf":
+            return _metadata_pdf(path)
+        if suffix == ".docx":
+            return _metadata_docx(path)
+        if suffix in (".html", ".htm"):
+            return _metadata_html(path)
+    except Exception:
+        return {"title": None, "author": None, "published_at": None, "page_count": None}
+    return {"title": None, "author": None, "published_at": None, "page_count": None}
+
+
+def _metadata_pdf(path: Path) -> dict:
+    import fitz
+
+    with fitz.open(path) as doc:
+        md = doc.metadata or {}
+        title = (md.get("title") or "").strip() or None
+        author = (md.get("author") or "").strip() or None
+        page_count = doc.page_count
+        published_at = _parse_pdf_date(md.get("creationDate") or "")
+    return {
+        "title": title,
+        "author": author,
+        "published_at": published_at,
+        "page_count": page_count,
+    }
+
+
+def _metadata_docx(path: Path) -> dict:
+    import docx
+
+    doc = docx.Document(str(path))
+    cp = doc.core_properties
+    title = (cp.title or "").strip() or None
+    author = (cp.author or "").strip() or None
+    published_at = cp.created
+    if isinstance(published_at, datetime):
+        if published_at.tzinfo is None:
+            published_at = published_at.replace(tzinfo=timezone.utc)
+    else:
+        published_at = None
+    return {
+        "title": title,
+        "author": author,
+        "published_at": published_at,
+        "page_count": None,  # docx has no native page-count concept
+    }
+
+
+def _metadata_html(path: Path) -> dict:
+    html = path.read_text(encoding="utf-8", errors="ignore")
+    soup = BeautifulSoup(html, "lxml")
+    title_el = soup.find("title")
+    title = title_el.get_text(strip=True) or None if title_el else None
+    author = None
+    author_meta = soup.find("meta", attrs={"name": "author"})
+    if author_meta and author_meta.get("content"):
+        author = author_meta["content"].strip() or None
+    published_at = None
+    pub_meta = soup.find("meta", attrs={"property": "article:published_time"})
+    if pub_meta and pub_meta.get("content"):
+        published_at = _parse_iso_date(pub_meta["content"])
+    return {
+        "title": title,
+        "author": author,
+        "published_at": published_at,
+        "page_count": None,
+    }
+
+
+def _parse_pdf_date(s: str) -> datetime | None:
+    """Parse a PDF date string like ``D:YYYYMMDDHHmmSS+HH'mm``."""
+    if not s:
+        return None
+    m = _PDF_DATE_RE.match(s)
+    if not m:
+        return None
+    y, mo, d = int(m.group(1)), int(m.group(2)), int(m.group(3))
+    h = int(m.group(4) or 0)
+    mi = int(m.group(5) or 0)
+    sec = int(m.group(6) or 0)
+    tz_str = m.group(7)
+    if tz_str:
+        sign = 1 if tz_str[0] == "+" else -1
+        tz_h = int(tz_str[1:3])
+        tz_min = int(m.group(8) or 0)
+        offset = timedelta(hours=tz_h, minutes=tz_min) * sign
+        tz = timezone(offset)
+    else:
+        tz = timezone.utc
+    try:
+        return datetime(y, mo, d, h, mi, sec, tzinfo=tz)
+    except ValueError:
+        return None
+
+
+def _parse_iso_date(s: str) -> datetime | None:
+    """Parse an ISO-8601 date string (handles trailing ``Z``)."""
+    if not s:
+        return None
+    s = s.strip()
+    if s.endswith("Z"):
+        s = s[:-1] + "+00:00"
+    try:
+        return datetime.fromisoformat(s)
+    except ValueError:
+        return None
+
+
+# ---------- author-affiliation extraction ----------
+
+
+def extract_author_affiliation(first_page_text: str | None) -> str | None:
+    """Scan lines for an institutional keyword; return the first matching line.
+
+    Returns ``None`` when no line matches or the input is empty.
+    """
+    if not first_page_text:
+        return None
+    for line in first_page_text.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        if _AFFILIATION_RE.search(line):
+            return " ".join(line.split())  # collapse internal whitespace
+    return None
+
+
+def _first_page_text(path: Path) -> str | None:
+    """Return a text snippet from the first page for affiliation scanning."""
+    suffix = path.suffix.lower()
+    try:
+        if suffix == ".pdf":
+            import fitz
+
+            with fitz.open(path) as doc:
+                if len(doc) == 0:
+                    return None
+                return doc[0].get_text()
+        if suffix == ".docx":
+            import docx
+
+            d = docx.Document(str(path))
+            return "\n".join(p.text for p in d.paragraphs[:20])
+        if suffix in (".html", ".htm"):
+            html = path.read_text(encoding="utf-8", errors="ignore")
+            soup = BeautifulSoup(html, "lxml")
+            body = soup.find("body")
+            return body.get_text("\n", strip=True) if body else None
+    except Exception:
+        return None
+    return None
+
+
+# ---------- figure extraction ----------
+
+
+def extract_figures(path: Path, max_count: int) -> list[FigureData]:
+    """Extract embedded images as ``FigureData`` (bytes only, no disk writes).
+
+    Returns at most ``max_count`` items. For txt/md/html returns ``[]``.
+    """
+    suffix = path.suffix.lower()
+    try:
+        if suffix == ".pdf":
+            return _figures_pdf(path, max_count)
+        if suffix == ".docx":
+            return _figures_docx(path, max_count)
+    except Exception:
+        return []
+    return []
+
+
+def _figures_pdf(path: Path, max_count: int) -> list[FigureData]:
+    import fitz
+
+    figures: list[FigureData] = []
+    seen_xrefs: set[int] = set()
+    with fitz.open(path) as doc:
+        for page in doc:
+            for img in page.get_images(full=True):
+                xref = img[0]
+                if xref in seen_xrefs:
+                    continue
+                seen_xrefs.add(xref)
+                try:
+                    info = doc.extract_image(xref)
+                except Exception:
+                    continue
+                data: bytes | None = info.get("image")
+                if not data:
+                    continue
+                ext = (info.get("ext") or "bin").lower()
+                figures.append(_make_figure_data(data, ext))
+                if len(figures) >= max_count:
+                    return figures
+    return figures
+
+
+def _figures_docx(path: Path, max_count: int) -> list[FigureData]:
+    import docx
+
+    document = docx.Document(str(path))
+    figures: list[FigureData] = []
+    for rel in document.part.rels.values():
+        if rel.is_external:
+            continue
+        try:
+            content_type = rel.target_part.content_type
+            blob: bytes = rel.target_part.blob
+        except Exception:
+            continue
+        if not content_type or not content_type.startswith("image/"):
+            continue
+        ext = content_type.split("/")[-1].lower()
+        figures.append(_make_figure_data(blob, ext, mime=content_type))
+        if len(figures) >= max_count:
+            break
+    return figures
+
+
+def _make_figure_data(data: bytes, ext: str, mime: str | None = None) -> FigureData:
+    """Build a ``FigureData``, deriving mime and parsing PNG/JPEG dimensions."""
+    ext = (ext or "bin").lower()
+    if mime is None:
+        mime = _ext_to_mime(ext)
+    width = height = None
+    if ext == "png" or mime == "image/png":
+        wh = _png_size(data)
+        if wh:
+            width, height = wh
+    elif ext in ("jpg", "jpeg", "jpe") or mime == "image/jpeg":
+        wh = _jpeg_size(data)
+        if wh:
+            width, height = wh
+    return FigureData(
+        bytes_data=data, ext=ext, mime=mime, width=width, height=height
+    )
+
+
+def _ext_to_mime(ext: str) -> str:
+    mapping = {
+        "png": "image/png",
+        "jpg": "image/jpeg",
+        "jpeg": "image/jpeg",
+        "jpe": "image/jpeg",
+        "gif": "image/gif",
+        "bmp": "image/bmp",
+        "tif": "image/tiff",
+        "tiff": "image/tiff",
+        "webp": "image/webp",
+        "svg": "image/svg+xml",
+    }
+    return mapping.get(ext, f"image/{ext}")
+
+
+def _png_size(data: bytes) -> tuple[int, int] | None:
+    """Parse width/height from a PNG's IHDR chunk."""
+    if len(data) < 24 or not data.startswith(b"\x89PNG\r\n\x1a\n"):
+        return None
+    width = int.from_bytes(data[16:20], "big")
+    height = int.from_bytes(data[20:24], "big")
+    return width, height
+
+
+def _jpeg_size(data: bytes) -> tuple[int, int] | None:
+    """Parse width/height from a JPEG by scanning SOF markers."""
+    if len(data) < 4 or not data.startswith(b"\xff\xd8"):
+        return None
+    i = 2
+    while i + 8 < len(data):
+        if data[i] != 0xFF:
+            i += 1
+            continue
+        marker = data[i + 1]
+        # SOF markers: C0-C3, C5-C7, C9-CB, CD-CF (exclude C4/C8/CC)
+        if 0xC0 <= marker <= 0xCF and marker not in (0xC4, 0xC8, 0xCC):
+            height = int.from_bytes(data[i + 5 : i + 7], "big")
+            width = int.from_bytes(data[i + 7 : i + 9], "big")
+            return width, height
+        # Skip this marker's segment (length is 2 bytes BE at i+2)
+        if i + 3 >= len(data):
+            return None
+        seg_len = int.from_bytes(data[i + 2 : i + 4], "big")
+        i += 2 + seg_len
+    return None
+
+
+# ---------- full extraction (text + metadata + figures) ----------
+
+
+def _extract_full(path: Path) -> InfoItemData | None:
+    """Extract text + metadata + figures, packed into ``InfoItemData.extra``.
+
+    Returns ``None`` if text extraction fails. Title falls back to the filename
+    when metadata has no title.
+    """
+    content = extract_text(path)
+    if content is None:
+        return None
+    metadata = extract_metadata(path)
+    first_page = _first_page_text(path)
+    affiliation = extract_author_affiliation(first_page)
+    figures = extract_figures(path, settings.max_figures_per_item)
+    if len(figures) >= settings.max_figures_per_item:
+        _logger.warning(
+            "图表数达到上限 %d，可能已截断: %s", settings.max_figures_per_item, path
+        )
+    title = metadata.get("title") or path.name
+    mtime = datetime.fromtimestamp(path.stat().st_mtime, tz=timezone.utc)
+    return InfoItemData(
+        external_id=str(path.resolve()),
+        title=title,
+        url=str(path),
+        content=content,
+        published_at=mtime,
+        extra={
+            "author": metadata.get("author"),
+            "author_affiliation": affiliation,
+            "article_published_at": metadata.get("published_at"),
+            "page_count": metadata.get("page_count"),
+            "figures": figures,
+        },
+    )
+
+
+# ---------- adapter ----------
 
 
 class LocalFolderAdapter(InfoSourceAdapter):
@@ -100,18 +464,17 @@ class LocalFolderAdapter(InfoSourceAdapter):
             # 增量 + 回补：已索引且未变更的文件跳过，不重读内容。
             if since and ext_id in known and mtime <= since:
                 continue
-            content = extract_text(f)
-            if content is None:
+            item = _extract_full(f)
+            if item is None:
                 continue
-            items.append(
-                InfoItemData(
-                    external_id=ext_id,
-                    title=f.name,
-                    url=str(f),
-                    content=content,
-                    published_at=mtime,
-                )
-            )
+            items.append(item)
             if len(items) >= self.max_items:
                 break
         return items
+
+    def reextract(self, external_id: str) -> InfoItemData | None:
+        """Re-extract a single file by its path (external_id)."""
+        p = Path(external_id)
+        if not p.exists():
+            return None
+        return _extract_full(p)

@@ -8,6 +8,22 @@ from typing import Any
 
 
 @dataclass
+class FigureData:
+    """An extracted figure's raw bytes + metadata, before persistence.
+
+    The adapter extracts image bytes and parses width/height from the image
+    header; ``sync.py`` is responsible for writing bytes to disk and creating
+    ``InfoItemFigure`` rows (it owns ``settings.figures_dir`` and ``item_id``).
+    """
+
+    bytes_data: bytes
+    ext: str
+    mime: str
+    width: int | None = None
+    height: int | None = None
+
+
+@dataclass
 class InfoItemData:
     """A fetched item, before persistence. Adapter-agnostic."""
 
@@ -56,6 +72,16 @@ class InfoSourceAdapter(ABC):
         - subsequent syncs skip known-unchanged items (no re-read) and only
           return new / modified / not-yet-backed-filled items.
         """
+
+    def reextract(self, external_id: str) -> InfoItemData | None:
+        """Re-extract a single item by its ``external_id``.
+
+        Returns a fresh ``InfoItemData`` (with metadata + figures in ``extra``)
+        or ``None`` if the source does not support re-extraction or the
+        underlying resource is gone. Default implementation returns ``None``
+        (sources that support re-extraction override this).
+        """
+        return None
 
     @staticmethod
     def required_config_keys() -> list[str]:
