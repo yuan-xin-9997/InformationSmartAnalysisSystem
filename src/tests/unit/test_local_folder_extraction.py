@@ -459,3 +459,57 @@ def test_base_adapter_default_reextract_returns_none():
 
     stub = _Stub({})
     assert stub.reextract("any-id") is None
+
+
+# ---------- extraction failure logging (review fix) ----------
+
+
+def test_extract_metadata_logs_warning_on_corrupted_pdf(tmp_path, caplog):
+    """A corrupted PDF must emit a warning (not silently return all-None)."""
+    import logging
+
+    from app.backend.services.info_source.local_folder import extract_metadata
+
+    pdf = tmp_path / "broken.pdf"
+    pdf.write_bytes(b"not a real pdf")
+    with caplog.at_level(logging.WARNING, logger="local_folder"):
+        md = extract_metadata(pdf)
+    assert md == {"title": None, "author": None, "published_at": None, "page_count": None}
+    assert any(
+        r.levelno == logging.WARNING and "抽取元数据失败" in r.getMessage()
+        for r in caplog.records
+    )
+
+
+def test_extract_figures_logs_warning_on_corrupted_pdf(tmp_path, caplog):
+    """A corrupted PDF must emit a warning from extract_figures (not silent [])."""
+    import logging
+
+    from app.backend.services.info_source.local_folder import extract_figures
+
+    pdf = tmp_path / "broken.pdf"
+    pdf.write_bytes(b"not a real pdf")
+    with caplog.at_level(logging.WARNING, logger="local_folder"):
+        figs = extract_figures(pdf, max_count=10)
+    assert figs == []
+    assert any(
+        r.levelno == logging.WARNING and "抽取图表失败" in r.getMessage()
+        for r in caplog.records
+    )
+
+
+def test_first_page_text_logs_warning_on_corrupted_pdf(tmp_path, caplog):
+    """A corrupted PDF must emit a warning from _first_page_text (not silent None)."""
+    import logging
+
+    from app.backend.services.info_source.local_folder import _first_page_text
+
+    pdf = tmp_path / "broken.pdf"
+    pdf.write_bytes(b"not a real pdf")
+    with caplog.at_level(logging.WARNING, logger="local_folder"):
+        result = _first_page_text(pdf)
+    assert result is None
+    assert any(
+        r.levelno == logging.WARNING and "抽取首页文本失败" in r.getMessage()
+        for r in caplog.records
+    )

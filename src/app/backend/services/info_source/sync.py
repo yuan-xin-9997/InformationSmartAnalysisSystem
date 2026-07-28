@@ -209,6 +209,7 @@ def run_sync(run_id: int, source_id: int) -> None:
                     bf_item.published_at = data.published_at
                     bf_item.content_hash = ch
                     bf_item.fetched_at = now
+                    bf_item.analyzed = False
                     _apply_metadata(bf_item, data.extra)
                     _save_figures(db, bf_item.id, new_figs, settings.figures_dir)
                     backfill_count += 1

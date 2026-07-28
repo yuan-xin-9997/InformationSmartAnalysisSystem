@@ -86,6 +86,7 @@ def extract_metadata(path: Path) -> dict:
         if suffix in (".html", ".htm"):
             return _metadata_html(path)
     except Exception:
+        _logger.warning("抽取元数据失败: %s", path, exc_info=True)
         return {"title": None, "author": None, "published_at": None, "page_count": None}
     return {"title": None, "author": None, "published_at": None, "page_count": None}
 
@@ -229,6 +230,7 @@ def _first_page_text(path: Path) -> str | None:
             body = soup.find("body")
             return body.get_text("\n", strip=True) if body else None
     except Exception:
+        _logger.warning("抽取首页文本失败: %s", path, exc_info=True)
         return None
     return None
 
@@ -248,6 +250,7 @@ def extract_figures(path: Path, max_count: int) -> list[FigureData]:
         if suffix == ".docx":
             return _figures_docx(path, max_count)
     except Exception:
+        _logger.warning("抽取图表失败: %s", path, exc_info=True)
         return []
     return []
 

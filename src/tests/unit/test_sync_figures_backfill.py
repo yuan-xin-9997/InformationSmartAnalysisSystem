@@ -244,6 +244,48 @@ def test_backfill_skips_txt_with_nothing_to_fill(db_session, tmp_path):
         assert refreshed.page_count is None
 
 
+def test_backfill_resets_analyzed_when_content_changes(db_session, tmp_path):
+    """When backfill detects a change (content_hash differs), analyzed must be
+    reset to False so stale analysis results get re-triggered (review fix)."""
+    from app.backend.models.info_source import InfoItem, InfoSource
+    from app.backend.services.info_source.sync import run_sync
+
+    pdf = tmp_path / "doc.pdf"
+    _make_pdf(pdf, title="T", author="A", text_lines=["北京大学"])
+
+    source_id = _make_source(db_session, tmp_path)
+    # Legacy item: analyzed was True, content_hash is stale (differs from real
+    # file content) so backfill will update it.
+    item = InfoItem(
+        source_id=source_id,
+        external_id=str(pdf.resolve()),
+        title="doc.pdf",
+        content="old content",
+        content_hash="legacy-hash",
+        author=None,
+        page_count=None,
+        analyzed=True,  # previously analyzed; must be reset after backfill
+    )
+    db_session.add(item)
+    db_session.commit()
+    item_id = item.id
+
+    src = db_session.get(InfoSource, source_id)
+    src.last_sync_at = datetime.now(timezone.utc) + timedelta(hours=1)
+    db_session.commit()
+
+    run_id = _make_task_run(db_session, source_id)
+    db_session.close()
+
+    run_sync(run_id, source_id)
+
+    with _new_session() as db:
+        refreshed = db.get(InfoItem, item_id)
+        assert refreshed is not None
+        assert refreshed.analyzed is False  # reset by backfill
+        assert refreshed.content_hash != "legacy-hash"  # content was re-extracted
+
+
 # ---------- reextract_item ----------
 
 
