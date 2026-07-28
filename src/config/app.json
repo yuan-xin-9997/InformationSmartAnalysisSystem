@@ -36,6 +36,8 @@
   },
   "data_dir": "data",
   "timezone_display": "Asia/Shanghai",
+  "figures_dir": "",
+  "max_figures_per_item": 20,
   "worker": {
     "max_workers": 4
   },

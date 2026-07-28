@@ -90,6 +90,18 @@ class Settings:
         self.data_dir: Path = _resolve_path(_env("ISAS_DATA_DIR", raw.get("data_dir", "data")))
         self.timezone_display: str = raw.get("timezone_display", "Asia/Shanghai")
 
+        # Figures storage (task 1: optimize-analysis-result-page).
+        # Default: data_dir/figures (isolated when ISAS_DATA_DIR points to a temp dir).
+        # Override: ISAS_FIGURES_DIR env var or app.json "figures_dir" (non-empty).
+        figures_dir_raw = _env("ISAS_FIGURES_DIR", raw.get("figures_dir", ""))
+        if figures_dir_raw:
+            self.figures_dir: Path = _resolve_path(str(figures_dir_raw))
+        else:
+            self.figures_dir = self.data_dir / "figures"
+        self.max_figures_per_item: int = int(
+            _env("ISAS_MAX_FIGURES_PER_ITEM", raw.get("max_figures_per_item", 20))
+        )
+
         wk = raw.get("worker", {})
         self.worker_max_workers: int = int(
             _env("ISAS_WORKER_MAX_WORKERS", wk.get("max_workers", 4))

@@ -63,3 +63,75 @@ def test_email_env_override(monkeypatch):
     assert s.email_password == "pw123"
     assert s.email_from_email == "noreply@example.com"
     assert s.email_from_name == "推送机器人"
+
+
+def test_figures_dir_defaults_to_data_dir_figures():
+    """figures_dir defaults to data_dir/figures (empty app.json value)."""
+    from app.backend.core.config import settings
+
+    assert settings.figures_dir == settings.data_dir / "figures"
+
+
+def test_max_figures_per_item_default():
+    """max_figures_per_item defaults to 20."""
+    from app.backend.core.config import settings
+
+    assert settings.max_figures_per_item == 20
+
+
+def test_figures_dir_env_override(monkeypatch):
+    """ISAS_FIGURES_DIR overrides the default data_dir/figures."""
+    from app.backend.core.config import PROJECT_ROOT, Settings
+
+    monkeypatch.setenv("ISAS_FIGURES_DIR", "custom/figs")
+    s = Settings()
+    assert s.figures_dir == PROJECT_ROOT / "custom" / "figs"
+
+
+def test_figures_dir_env_override_absolute(monkeypatch, tmp_path):
+    """ISAS_FIGURES_DIR with an absolute path is used as-is."""
+    from app.backend.core.config import Settings
+
+    abs_dir = tmp_path / "abs-figs"
+    monkeypatch.setenv("ISAS_FIGURES_DIR", str(abs_dir))
+    s = Settings()
+    assert s.figures_dir == abs_dir
+
+
+def test_max_figures_per_item_env_override(monkeypatch):
+    """ISAS_MAX_FIGURES_PER_ITEM overrides the default 20."""
+    from app.backend.core.config import Settings
+
+    monkeypatch.setenv("ISAS_MAX_FIGURES_PER_ITEM", "50")
+    s = Settings()
+    assert s.max_figures_per_item == 50
+
+
+def test_figures_dir_config_file_override(monkeypatch, tmp_path):
+    """app.json figures_dir (non-empty) is used when env var is absent."""
+    import json
+
+    from app.backend.core.config import PROJECT_ROOT, Settings
+
+    cfg = tmp_path / "app.json"
+    cfg.write_text(
+        json.dumps({"figures_dir": "from_config/figs"}), encoding="utf-8"
+    )
+    monkeypatch.setenv("ISAS_CONFIG", str(cfg))
+    monkeypatch.delenv("ISAS_FIGURES_DIR", raising=False)
+    s = Settings()
+    assert s.figures_dir == PROJECT_ROOT / "from_config" / "figs"
+
+
+def test_max_figures_per_item_config_file_override(monkeypatch, tmp_path):
+    """app.json max_figures_per_item is used when env var is absent."""
+    import json
+
+    from app.backend.core.config import Settings
+
+    cfg = tmp_path / "app.json"
+    cfg.write_text(json.dumps({"max_figures_per_item": 99}), encoding="utf-8")
+    monkeypatch.setenv("ISAS_CONFIG", str(cfg))
+    monkeypatch.delenv("ISAS_MAX_FIGURES_PER_ITEM", raising=False)
+    s = Settings()
+    assert s.max_figures_per_item == 99

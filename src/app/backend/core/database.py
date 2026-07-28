@@ -55,6 +55,11 @@ def init_db() -> None:
     Base.metadata.create_all(bind=engine)
     # Migrate pre-existing tables (create_all does not ALTER existing tables).
     _ensure_column(engine, "task_runs", "scheduled_job_id", "INTEGER")
+    # InfoItem article-metadata columns (task 1: optimize-analysis-result-page).
+    _ensure_column(engine, "info_items", "author", "TEXT")
+    _ensure_column(engine, "info_items", "author_affiliation", "TEXT")
+    _ensure_column(engine, "info_items", "article_published_at", "DATETIME")
+    _ensure_column(engine, "info_items", "page_count", "INTEGER")
 
 
 def get_db() -> Iterator[Session]:

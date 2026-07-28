@@ -51,4 +51,33 @@ class InfoItem(Base):
     analyzed: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
+    # Article metadata (nullable, populated by extraction in later tasks).
+    author: Mapped[str | None] = mapped_column(String(256), nullable=True)
+    author_affiliation: Mapped[str | None] = mapped_column(String(256), nullable=True)
+    article_published_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    page_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
     source: Mapped[InfoSource] = relationship(back_populates="items")
+    figures: Mapped[list["InfoItemFigure"]] = relationship(
+        back_populates="item", cascade="all, delete-orphan"
+    )
+
+
+class InfoItemFigure(Base):
+    """A figure/image extracted from an InfoItem's source document."""
+
+    __tablename__ = "info_item_figures"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    item_id: Mapped[int] = mapped_column(
+        ForeignKey("info_items.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    figure_index: Mapped[int] = mapped_column(Integer, nullable=False)
+    storage_path: Mapped[str] = mapped_column(String(512), nullable=False)
+    mime: Mapped[str] = mapped_column(String(64), nullable=False)
+    width: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    height: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    caption: Mapped[str | None] = mapped_column(String(256), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+    item: Mapped[InfoItem] = relationship(back_populates="figures")

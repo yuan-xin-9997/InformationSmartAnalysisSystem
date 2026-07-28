@@ -40,6 +40,7 @@ async def lifespan(app: FastAPI):
     logger.info("启动信息智能分析系统 (InformationSmartAnalysisSystem)")
     settings.data_dir.mkdir(parents=True, exist_ok=True)
     (settings.data_dir / "downloads").mkdir(parents=True, exist_ok=True)
+    settings.figures_dir.mkdir(parents=True, exist_ok=True)
     init_db()
     logger.info("数据库初始化完成: %s", settings.database_path)
     # Sync users from password.txt (file may not exist yet on first deploy ->
