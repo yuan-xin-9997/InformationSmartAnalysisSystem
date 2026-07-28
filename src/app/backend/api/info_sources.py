@@ -1,13 +1,17 @@
 """Information-source management endpoints."""
 from __future__ import annotations
 
+from pathlib import Path
+
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi.responses import FileResponse, PlainTextResponse
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from ..core.config import settings
 from ..core.database import get_db
 from ..core.deps import require_page
-from ..models.info_source import InfoItem, InfoSource
+from ..models.info_source import InfoItem, InfoItemFigure, InfoSource
 from ..models.task import TaskRun
 from ..models.user import User
 from ..schemas.info_source import (
@@ -23,7 +27,7 @@ from ..schemas.info_source import (
 from ..services import worker
 from ..services.info_source import get_adapter, validate_config
 from ..services.info_source.factory import type_specs
-from ..services.info_source.sync import run_sync
+from ..services.info_source.sync import reextract_item, run_sync
 
 router = APIRouter(prefix="/api/info-sources", tags=["信息源管理"])
 
@@ -256,3 +260,132 @@ def get_item(
     if item is None or item.source_id != source_id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="信息项不存在")
     return item
+
+
+# ---------- file preview / figure serving / reextract (task 4) ----------
+
+_DOCX_MEDIA_TYPE = (
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+)
+
+
+def _get_owned_item(
+    db: Session, source_id: int, item_id: int
+) -> InfoItem:
+    """Return the InfoItem if it exists and belongs to ``source_id``, else 404."""
+    item = db.get(InfoItem, item_id)
+    if item is None or item.source_id != source_id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="信息项不存在"
+        )
+    return item
+
+
+@router.get("/{source_id}/items/{item_id}/file")
+def get_item_file(
+    source_id: int,
+    item_id: int,
+    _: User = Depends(require_page("analysis_tasks")),
+    db: Session = Depends(get_db),
+):
+    """Preview/download the source file backing an InfoItem.
+
+    - PDF: inline (browser-embedded preview)
+    - docx: attachment (download)
+    - html/txt/md: text/plain (never text/html, to avoid XSS)
+    """
+    item = _get_owned_item(db, source_id, item_id)
+    src = db.get(InfoSource, source_id)
+    if src is None or src.type != "local_folder":
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="该信息源类型不支持文件预览",
+        )
+
+    file_path = Path(item.external_id)
+    folder_root = Path(src.config["folder_path"]).resolve()
+    resolved = file_path.resolve()
+    # Path-traversal defense: the file must live under the source's folder_path.
+    if not resolved.is_relative_to(folder_root):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail="路径不在允许范围内"
+        )
+    if not resolved.exists() or not resolved.is_file():
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="文件不存在"
+        )
+
+    suffix = resolved.suffix.lower()
+    if suffix == ".pdf":
+        return FileResponse(
+            str(resolved),
+            media_type="application/pdf",
+            filename=item.title or resolved.name,
+            content_disposition_type="inline",
+        )
+    if suffix == ".docx":
+        return FileResponse(
+            str(resolved),
+            media_type=_DOCX_MEDIA_TYPE,
+            filename=item.title or resolved.name,
+            content_disposition_type="attachment",
+        )
+    if suffix in (".html", ".htm", ".txt", ".md"):
+        return PlainTextResponse(
+            resolved.read_text(encoding="utf-8", errors="ignore"),
+            media_type="text/plain; charset=utf-8",
+        )
+    raise HTTPException(
+        status_code=status.HTTP_404_NOT_FOUND, detail="不支持的文件类型"
+    )
+
+
+@router.get("/{source_id}/items/{item_id}/figures/{index}")
+def get_item_figure(
+    source_id: int,
+    item_id: int,
+    index: int,
+    _: User = Depends(require_page("analysis_tasks")),
+    db: Session = Depends(get_db),
+):
+    """Serve a single figure image (by index) belonging to an InfoItem."""
+    _get_owned_item(db, source_id, item_id)
+
+    fig = db.scalars(
+        select(InfoItemFigure).where(
+            InfoItemFigure.item_id == item_id,
+            InfoItemFigure.figure_index == index,
+        )
+    ).first()
+    if fig is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="图表不存在"
+        )
+
+    fig_path = Path(fig.storage_path).resolve()
+    # Path-traversal defense: the figure must live under figures_dir.
+    if not fig_path.is_relative_to(settings.figures_dir.resolve()):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail="路径不在允许范围内"
+        )
+    if not fig_path.exists() or not fig_path.is_file():
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="文件不存在"
+        )
+    return FileResponse(str(fig_path), media_type=fig.mime or "application/octet-stream")
+
+
+@router.post("/{source_id}/items/{item_id}/reextract")
+def reextract_item_api(
+    source_id: int,
+    item_id: int,
+    _: User = Depends(require_page("info_sources")),
+    db: Session = Depends(get_db),
+):
+    """Manually re-extract metadata + figures for a single item."""
+    _get_owned_item(db, source_id, item_id)
+    try:
+        result = reextract_item(source_id, item_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc))
+    return result
