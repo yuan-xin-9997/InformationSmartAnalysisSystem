@@ -88,9 +88,29 @@
           <div><p class="eyebrow">PICK ITEMS</p><h2>选择要分析的条目（已选 {{ form.custom_item_ids.length }} 篇）</h2></div>
           <button type="button" @click="pickerVisible = false">×</button>
         </div>
+        <div v-if="pickerSelected.length" class="picker-selected">
+          <div class="picker-selected-head">
+            <strong>已选 {{ pickerSelected.length }} 篇</strong>
+            <button type="button" class="link" @click="clearSelected">全部取消</button>
+          </div>
+          <div class="picker-scroll">
+            <table>
+              <thead><tr><th>取消</th><th>标题</th><th>已分析</th><th>发布时间</th></tr></thead>
+              <tbody>
+                <tr v-for="it in pickerSelected" :key="it.id">
+                  <td><input type="checkbox" :checked="true" @change="togglePick(it)" /></td>
+                  <td>{{ it.title || '(无标题)' }}</td>
+                  <td>{{ it.analyzed ? '是' : '否' }}</td>
+                  <td>{{ it.published_at || '-' }}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
         <div class="toolbar" style="margin-bottom:12px">
           <div class="stats"><strong>{{ pickerTotal }}</strong><span>条可选</span></div>
           <div class="button-row">
+            <input v-model="pickerKeyword" @input="onPickerKeywordInput" placeholder="按标题筛选" style="width:150px" />
             <select v-model="pickerFilter" style="width:auto" @change="onPickerFilterChange">
               <option value="">全部</option>
               <option value="analyzed">已分析</option>
@@ -105,10 +125,15 @@
         </div>
         <div v-if="!pickerItems.length" class="empty compact">无符合条件的条目</div>
         <table v-else>
-          <thead><tr><th>选择</th><th>标题</th><th>已分析</th><th>发布时间</th></tr></thead>
+          <thead><tr>
+            <th>选择</th>
+            <th class="sortable" @click="onSort('title')">标题 <span v-if="sortIcon('title')">{{ sortIcon('title') }}</span></th>
+            <th class="sortable" @click="onSort('analyzed')">已分析 <span v-if="sortIcon('analyzed')">{{ sortIcon('analyzed') }}</span></th>
+            <th class="sortable" @click="onSort('published_at')">发布时间 <span v-if="sortIcon('published_at')">{{ sortIcon('published_at') }}</span></th>
+          </tr></thead>
           <tbody>
             <tr v-for="it in pickerItems" :key="it.id">
-              <td><input type="checkbox" :checked="isPicked(it.id)" @change="togglePick(it.id)" /></td>
+              <td><input type="checkbox" :checked="isPicked(it.id)" @change="togglePick(it)" /></td>
               <td>{{ it.title || '(无标题)' }}</td>
               <td>{{ it.analyzed ? '是' : '否' }}</td>
               <td>{{ it.published_at || '-' }}</td>
@@ -184,6 +209,14 @@ const pickerPageSize = ref(50)
 const pickerFilter = ref<'' | 'analyzed' | 'unanalyzed'>('')
 const pickerTotal = ref(0)
 const pickerTotalPages = computed(() => Math.max(1, Math.ceil(pickerTotal.value / pickerPageSize.value)))
+// 已选条目（前排置顶，独立于筛选/排序始终可见）
+const pickerSelected = ref<InfoItemBrief[]>([])
+// 列排序 / 标题关键词筛选
+const pickerSortBy = ref<string | null>(null)
+const pickerSortOrder = ref<'asc' | 'desc'>('desc')
+const pickerKeyword = ref('')
+let pickerKeywordTimer: ReturnType<typeof setTimeout> | null = null
+let pickerReqId = 0  // 仅应用最新一次 loadPicker 的响应，避免快速勾选时旧响应覆盖新状态
 
 onMounted(async () => {
   await load()
@@ -293,11 +326,30 @@ async function loadPicker() {
     pickerTotal.value = 0
     return
   }
+  const myId = ++pickerReqId
   const a = pickerAnalyzed()
   const offset = (pickerPage.value - 1) * pickerPageSize.value
-  const r = await queryItemsApi(form.source_ids, pickerPageSize.value, offset, a)
+  // 可浏览列表排除已选，避免与已选区重复；透传列排序与标题关键词
+  const r = await queryItemsApi(form.source_ids, pickerPageSize.value, offset, a, {
+    exclude_ids: form.custom_item_ids,
+    sort_by: pickerSortBy.value || undefined,
+    order: pickerSortBy.value ? pickerSortOrder.value : undefined,
+    keyword: pickerKeyword.value.trim() || undefined,
+  })
+  if (myId !== pickerReqId) return  // 旧响应，丢弃
   pickerItems.value = r.items
   pickerTotal.value = r.total
+}
+async function loadSelected() {
+  // 已选区独立取数：按 id 取回详情，不受 keyword/analyzed/排序影响，始终可见
+  if (!form.custom_item_ids.length) {
+    pickerSelected.value = []
+    return
+  }
+  const r = await queryItemsApi(form.source_ids, form.custom_item_ids.length, 0, undefined, {
+    ids: form.custom_item_ids,
+  })
+  pickerSelected.value = r.items
 }
 async function openPicker() {
   if (!form.source_ids.length) {
@@ -307,6 +359,10 @@ async function openPicker() {
   pickerPage.value = 1
   pickerFilter.value = ''
   pickerPageSize.value = 50
+  pickerSortBy.value = null
+  pickerSortOrder.value = 'desc'
+  pickerKeyword.value = ''
+  await loadSelected()
   await loadPicker()
   pickerVisible.value = true
 }
@@ -317,6 +373,27 @@ function onPickerFilterChange() {
 function onPickerPageSizeChange() {
   pickerPage.value = 1
   loadPicker()
+}
+function onPickerKeywordInput() {
+  if (pickerKeywordTimer) clearTimeout(pickerKeywordTimer)
+  pickerKeywordTimer = setTimeout(() => {
+    pickerPage.value = 1
+    loadPicker()
+  }, 300)
+}
+function onSort(col: string) {
+  if (pickerSortBy.value !== col) {
+    pickerSortBy.value = col
+    pickerSortOrder.value = 'asc'
+  } else {
+    pickerSortOrder.value = pickerSortOrder.value === 'asc' ? 'desc' : 'asc'
+  }
+  pickerPage.value = 1
+  loadPicker()
+}
+function sortIcon(col: string): string {
+  if (pickerSortBy.value !== col) return ''
+  return pickerSortOrder.value === 'asc' ? '▲' : '▼'
 }
 function pickerPrev() {
   if (pickerPage.value > 1) {
@@ -333,11 +410,21 @@ function pickerNext() {
 function isPicked(id: number) {
   return form.custom_item_ids.includes(id)
 }
-function togglePick(id: number) {
-  if (isPicked(id)) {
-    form.custom_item_ids = form.custom_item_ids.filter((x) => x !== id)
+function togglePick(it: InfoItemBrief) {
+  if (isPicked(it.id)) {
+    // 取消选择：移出已选区，该条回到可浏览列表（由 loadPicker 按当前排序/筛选重新放置）
+    form.custom_item_ids = form.custom_item_ids.filter((x) => x !== it.id)
+    pickerSelected.value = pickerSelected.value.filter((s) => s.id !== it.id)
   } else {
-    form.custom_item_ids = [...form.custom_item_ids, id]
+    // 勾选：移入已选区，可浏览列表重取后自动排除该条并补满本页
+    form.custom_item_ids = [...form.custom_item_ids, it.id]
+    pickerSelected.value = [...pickerSelected.value, it]
   }
+  loadPicker()
+}
+function clearSelected() {
+  form.custom_item_ids = []
+  pickerSelected.value = []
+  loadPicker()
 }
 </script>

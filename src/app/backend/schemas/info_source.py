@@ -1,6 +1,8 @@
 """Information-source schemas."""
 from __future__ import annotations
 
+from typing import Literal
+
 from pydantic import field_serializer
 
 from ..core.secrets import mask_sensitive
@@ -84,6 +86,12 @@ class ItemsQueryRequest(ORMBase):
     limit: int = 50
     offset: int = 0
     analyzed: bool | None = None
+    # 选择条目弹窗增强：已选取数 / 排除已选 / 列排序 / 关键词筛选（均可选，向后兼容）
+    ids: list[int] | None = None
+    exclude_ids: list[int] | None = None
+    sort_by: str | None = None
+    order: Literal["asc", "desc"] = "desc"
+    keyword: str | None = None
 
 
 class ItemsQueryResponse(ORMBase):

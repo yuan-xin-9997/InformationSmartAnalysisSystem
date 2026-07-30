@@ -5,7 +5,7 @@ from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import FileResponse, PlainTextResponse
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from ..core.config import settings
@@ -38,31 +38,50 @@ def get_types(_: User = Depends(require_page("info_sources"))):
     return type_specs()
 
 
+# 选择条目弹窗列排序的白名单：sort_by 值 -> ORM 列。未知值回退 id 倒序，防注入。
+_SORT_COLUMNS = {
+    "title": InfoItem.title,
+    "published_at": InfoItem.published_at,
+    "analyzed": InfoItem.analyzed,
+    "created_at": InfoItem.created_at,
+}
+
+
 @router.post("/items/query", response_model=ItemsQueryResponse)
 def query_items(
     req: ItemsQueryRequest,
     _: User = Depends(require_page("info_sources")),
     db: Session = Depends(get_db),
 ):
-    """跨多个信息源分页查询条目（供自定义分析模式的条目选择器）。"""
+    """跨多个信息源分页查询条目（供自定义分析模式的条目选择器）。
+
+    支持已选取数(`ids`)、排除已选(`exclude_ids`)、按白名单列排序(`sort_by`/`order`)、
+    标题模糊匹配(`keyword`)。所有过滤均在 SQL 层统一应用后再分页，保证每页满额。
+    """
     if not req.source_ids:
         return ItemsQueryResponse(items=[], total=0)
-    base = db.query(InfoItem).filter(InfoItem.source_id.in_(req.source_ids))
+
+    stmt = select(InfoItem).where(InfoItem.source_id.in_(req.source_ids))
     if req.analyzed is not None:
-        base = base.filter(InfoItem.analyzed == req.analyzed)
-    total = base.count()
-    rows = (
-        db.scalars(
-            select(InfoItem)
-            .where(InfoItem.source_id.in_(req.source_ids))
-            .order_by(InfoItem.id.desc())
-            .limit(req.limit)
-            .offset(req.offset)
-        )
-        .all()
-    )
-    if req.analyzed is not None:
-        rows = [r for r in rows if r.analyzed == req.analyzed]
+        stmt = stmt.where(InfoItem.analyzed == req.analyzed)
+    if req.ids:
+        stmt = stmt.where(InfoItem.id.in_(req.ids))
+    if req.exclude_ids:
+        stmt = stmt.where(InfoItem.id.not_in(req.exclude_ids))
+    if req.keyword:
+        stmt = stmt.where(InfoItem.title.ilike(f"%{req.keyword}%"))
+
+    total = db.scalar(select(func.count()).select_from(stmt.subquery())) or 0
+
+    col = _SORT_COLUMNS.get(req.sort_by) if req.sort_by else None
+    if col is None:
+        # 缺省或非白名单字段：回退默认 id 倒序（忽略 order），与现状一致且防注入
+        stmt = stmt.order_by(InfoItem.id.desc())
+    else:
+        stmt = stmt.order_by(col.asc() if req.order == "asc" else col.desc())
+    stmt = stmt.limit(req.limit).offset(req.offset)
+
+    rows = db.scalars(stmt).all()
     return ItemsQueryResponse(items=rows, total=total)
 
 

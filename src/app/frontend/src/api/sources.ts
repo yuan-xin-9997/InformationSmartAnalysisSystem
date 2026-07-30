@@ -77,6 +77,19 @@ export const getFigureBlobApi = (sourceId: number, itemId: number, index: number
 export const reextractItemApi = (sourceId: number, itemId: number) =>
   request.post<unknown, { item_id: number; updated: boolean }>(`/api/info-sources/${sourceId}/items/${itemId}/reextract`)
 
+export interface ItemsQueryParams {
+  /** 仅返回指定 ID 的条目（用于取已选条目详情） */
+  ids?: number[]
+  /** 排除指定 ID（用于可浏览列表去重已选） */
+  exclude_ids?: number[]
+  /** 按白名单列排序：title/published_at/analyzed/created_at */
+  sort_by?: string
+  /** 升降序，仅 sort_by 有效时生效 */
+  order?: 'asc' | 'desc'
+  /** 标题模糊匹配（大小写不敏感） */
+  keyword?: string
+}
+
 export interface ItemsQueryResp {
   items: InfoItemBrief[]
   total: number
@@ -86,10 +99,12 @@ export const queryItemsApi = (
   limit = 50,
   offset = 0,
   analyzed?: boolean,
+  extra: ItemsQueryParams = {},
 ) =>
   request.post<unknown, ItemsQueryResp>('/api/info-sources/items/query', {
     source_ids,
     limit,
     offset,
     analyzed,
+    ...extra,
   })
