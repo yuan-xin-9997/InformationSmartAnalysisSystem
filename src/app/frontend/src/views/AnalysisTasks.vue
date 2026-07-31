@@ -58,6 +58,12 @@
             </select>
           </label>
         </div>
+        <label v-if="form.mode !== 'custom'">条目选择策略
+          <select v-model="form.selectionStrategy">
+            <option value="sequential">顺序分析（按入库顺序）</option>
+            <option value="newest_unanalyzed">最新未分析优先</option>
+          </select>
+        </label>
         <label>说明<input v-model.trim="form.description" placeholder="可选" /></label>
         <fieldset>
           <legend>绑定信息源</legend>
@@ -194,6 +200,7 @@ const form = reactive({
   name: '',
   description: '',
   mode: 'per_item',
+  selectionStrategy: 'sequential',
   source_ids: [] as number[],
   custom_item_ids: [] as number[],
 })
@@ -241,6 +248,7 @@ function openCreate() {
   form.name = ''
   form.description = ''
   form.mode = 'per_item'
+  form.selectionStrategy = 'sequential'
   form.source_ids = []
   form.custom_item_ids = []
   configText.value = ''
@@ -251,6 +259,7 @@ function openEdit(t: AnalysisTaskDetail) {
   form.name = t.name
   form.description = t.description
   form.mode = (t.config?.mode as string) || 'per_item'
+  form.selectionStrategy = (t.config?.selection_strategy as string) === 'newest_unanalyzed' ? 'newest_unanalyzed' : 'sequential'
   form.source_ids = t.sources.map((s) => s.source_id)
   form.custom_item_ids = [...((t.config?.custom_item_ids as number[] | undefined) || [])]
   configText.value = JSON.stringify(t.config || {}, null, 2)
@@ -268,6 +277,7 @@ async function onSave() {
     }
   }
   config.mode = form.mode
+  config.selection_strategy = form.selectionStrategy
   if (form.mode === 'custom') {
     config.custom_item_ids = form.custom_item_ids
     if (!form.custom_item_ids.length) {

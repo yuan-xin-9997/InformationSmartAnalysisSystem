@@ -7,6 +7,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from sqlalchemy import func
+
 from ...core.database import SessionLocal
 from ...core.logging import get_logger
 from ...core.timeutil import utcnow
@@ -104,14 +106,28 @@ def run_analysis(
                     total_results += 1
                 total_items = len(items)
             else:
+                strategy = str(cfg.get("selection_strategy") or "sequential").strip()
+                if strategy not in ("sequential", "newest_unanalyzed"):
+                    _log(db, run_id, "WARNING", f"未知条目选择策略 {strategy!r}，回退 sequential")
+                    strategy = "sequential"
                 for ts in task_sources:
                     source = ts.source
                     if source is None:
                         continue
                     q = db.query(InfoItem).filter(InfoItem.source_id == ts.source_id)
-                    if mode == "incremental" and ts.last_analyzed_item_id:
-                        q = q.filter(InfoItem.id > ts.last_analyzed_item_id)
-                    items = q.order_by(InfoItem.id.asc()).limit(max_per).all()
+                    if strategy == "newest_unanalyzed":
+                        # 未分析中按时间倒序取最新 N 篇，不依赖水位线筛选
+                        time_key = func.coalesce(
+                            InfoItem.published_at,
+                            InfoItem.article_published_at,
+                            InfoItem.fetched_at,
+                        )
+                        q = q.filter(InfoItem.analyzed.is_(False))
+                        items = q.order_by(time_key.desc(), InfoItem.id.desc()).limit(max_per).all()
+                    else:
+                        if mode == "incremental" and ts.last_analyzed_item_id:
+                            q = q.filter(InfoItem.id > ts.last_analyzed_item_id)
+                        items = q.order_by(InfoItem.id.asc()).limit(max_per).all()
 
                     if not items:
                         _log(db, run_id, "INFO", f"源 [{source.name}] 无新内容，跳过")
@@ -151,7 +167,7 @@ def run_analysis(
                             it.analyzed = True
                             total_results += 1
 
-                    ts.last_analyzed_item_id = items[-1].id
+                    ts.last_analyzed_item_id = max(it.id for it in items)
                     ts.last_analyzed_at = utcnow()
                     total_items += len(items)
 

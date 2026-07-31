@@ -20,6 +20,26 @@
 
 后端 `POST /api/info-sources/items/query` 扩展可选参数 `ids`/`exclude_ids`/`sort_by`/`order`/`keyword`，排序字段经白名单（`title`/`published_at`/`analyzed`/`created_at`）校验防注入，向后兼容（不传新参数行为不变）。
 
+## 分析任务·条目选择策略
+
+分析任务（`per_item`/`aggregate` 模式）支持配置「条目选择策略」（`config.selection_strategy`），决定从绑定信息源中如何选取待分析条目：
+
+- **顺序分析**（`sequential`，默认）：增量模式按入库 `id` 升序、水位线之后取最旧篇，分析后推进水位线；全量模式取全部。行为与历史版本一致。
+- **最新未分析优先**（`newest_unanalyzed`）：仅从 `analyzed == False` 的条目中，按 `COALESCE(published_at, article_published_at, fetched_at)` 降序（最新在前）选取 `max_items_per_source` 篇，不依赖水位线筛选；分析后置 `analyzed = True`，下次自动跳过。时间键优先文章发布时间，回退文档元数据发布时间，再回退入库时间，覆盖 website / local_folder / freshrss 全部源类型。
+
+前端在分析任务表单「条目选择策略」下拉中选择（自定义模式不适用，策略不生效）；也可在「高级配置 JSON」中写 `selection_strategy`（下拉值优先）。未知取值回退 `sequential`。
+
+## 每日定时分析最新文章 + 邮件推送
+
+借助「条目选择策略」+ 定时任务 + 推送规则，可实现每天自动分析一篇最新未分析文章并邮件推送：
+
+1. **信息源管理**：添加信息源并同步入库。
+2. **分析任务**：新建任务，绑定信息源，分析模式选「逐条分析」，条目选择策略选「最新未分析优先」，高级配置 JSON 填 `{"max_items_per_source": 1}`（每次只分析 1 篇）。
+3. **定时任务**：新建定时任务，关联该分析任务，模式选「增量」，触发类型 cron，表达式如 `0 9 * * *`（每天 9 点）。
+4. **推送管理**：配置 SMTP，新建推送规则，触发方式选「分析任务完成后自动」（`on_run`），勾选该分析任务与 `per_item` 事件类型，填写收件人。
+
+每日定时触发时，引擎从未分析条目中选时间最新的 1 篇分析，完成后自动发送邮件；下一篇次日再选。
+
 ## 配置
 
 主配置文件 `config/app.json`，支持 `ISAS_*` 环境变量覆盖。本次新增配置项：
