@@ -1,6 +1,8 @@
 """Push service core tests: incremental watermark, batching, failure, no_new, on_run hook."""
 from __future__ import annotations
 
+from datetime import datetime, timezone
+
 from app.backend.core.database import SessionLocal
 from app.backend.models.analysis import AnalysisResult, AnalysisTask
 from app.backend.models.push import PushRule, PushRun, get_smtp_config_row
@@ -274,3 +276,67 @@ def test_on_analysis_completed_disabled_rule_not_triggered(client, sync_worker, 
     assert fake.calls == []
     with SessionLocal() as db:
         assert db.query(PushRun).filter(PushRun.rule_id == rid).count() == 0
+
+
+def test_to_push_event_fills_per_item_fields(client):
+    from app.backend.services.push.service import _to_push_event
+    from app.backend.models.info_source import InfoItem, InfoSource
+
+    with SessionLocal() as db:
+        src = InfoSource(name="源", type="local_folder", config={})
+        db.add(src)
+        db.flush()
+        item = InfoItem(
+            source_id=src.id, external_id="/path/report.pdf", title="report.pdf",
+            author="张三", author_affiliation="高盛",
+            article_published_at=datetime(2026, 7, 25, tzinfo=timezone.utc),
+            page_count=12, content="c",
+        )
+        db.add(item)
+        db.flush()
+        task = AnalysisTask(name="T", config={})
+        db.add(task)
+        db.flush()
+        run = TaskRun(kind="analysis", ref_id=task.id, ref_name="T", status="succeeded")
+        db.add(run)
+        db.flush()
+        r = AnalysisResult(
+            task_run_id=run.id, task_id=task.id, source_id=src.id,
+            info_item_id=item.id, result_type="per_item", content="分析内容",
+        )
+        db.add(r)
+        db.commit()
+        db.refresh(r)
+        e = _to_push_event(db, r)
+    assert e.task_name == "T"
+    assert e.source_name == "源"
+    assert e.item_title == "report.pdf"
+    assert e.file_path == "/path/report.pdf"
+    assert e.author == "张三"
+    assert e.author_affiliation == "高盛"
+    assert e.page_count == 12
+    assert e.article_published_at is not None
+
+
+def test_to_push_event_aggregate_has_no_item_fields(client):
+    from app.backend.services.push.service import _to_push_event
+
+    with SessionLocal() as db:
+        task = AnalysisTask(name="T", config={})
+        db.add(task)
+        db.flush()
+        run = TaskRun(kind="analysis", ref_id=task.id, ref_name="T", status="succeeded")
+        db.add(run)
+        db.flush()
+        r = AnalysisResult(
+            task_run_id=run.id, task_id=task.id, source_id=None,
+            info_item_id=None, result_type="aggregate", content="汇总",
+        )
+        db.add(r)
+        db.commit()
+        db.refresh(r)
+        e = _to_push_event(db, r)
+    assert e.result_type == "aggregate"
+    assert e.item_title is None
+    assert e.file_path is None
+    assert e.author is None

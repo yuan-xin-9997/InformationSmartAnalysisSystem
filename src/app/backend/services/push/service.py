@@ -18,7 +18,7 @@ from ...core.database import SessionLocal
 from ...core.logging import get_logger
 from ...core.timeutil import utcnow
 from ...models.analysis import AnalysisResult, AnalysisTask
-from ...models.info_source import InfoSource
+from ...models.info_source import InfoItem, InfoSource
 from ...models.push import PushRule, PushRun
 from .. import worker
 from .channels import get_channel
@@ -41,12 +41,19 @@ def _collect_events(db, rule: PushRule) -> list[AnalysisResult]:
 def _to_push_event(db, r: AnalysisResult) -> PushEvent:
     task = db.get(AnalysisTask, r.task_id)
     source = db.get(InfoSource, r.source_id) if r.source_id else None
+    item = db.get(InfoItem, r.info_item_id) if r.info_item_id else None
     return PushEvent(
         task_name=task.name if task else f"任务#{r.task_id}",
         result_type=r.result_type,
         source_name=source.name if source else "(无)",
         content=r.content,
         created_at=r.created_at,
+        item_title=item.title if item else None,
+        file_path=item.external_id if item else None,
+        author=item.author if item else None,
+        author_affiliation=item.author_affiliation if item else None,
+        article_published_at=item.article_published_at if item else None,
+        page_count=item.page_count if item else None,
     )
 
 

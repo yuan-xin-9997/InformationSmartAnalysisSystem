@@ -13,6 +13,9 @@ python-docx==1.1.2
 beautifulsoup4==4.12.3
 lxml==5.3.0
 
+# 推送邮件 Markdown 渲染
+mistune>=3.0
+
 # 测试
 pytest==8.3.4
 
