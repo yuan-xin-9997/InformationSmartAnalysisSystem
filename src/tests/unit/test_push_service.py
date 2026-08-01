@@ -49,7 +49,7 @@ class _FakeChannel:
         self.n = 0
         self.calls: list[str] = []
 
-    def send(self, cfg, recipients, subject, html, text):
+    def send(self, cfg, recipients, subject, html, text, attachments=None):
         self.n += 1
         if self.fail_on and self.n == self.fail_on:
             raise RuntimeError("smtp boom")

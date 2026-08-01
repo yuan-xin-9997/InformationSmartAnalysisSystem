@@ -21,6 +21,7 @@ from ...models.analysis import AnalysisResult, AnalysisTask
 from ...models.info_source import InfoItem, InfoSource
 from ...models.push import PushRule, PushRun
 from .. import worker
+from .attachments import collect_attachments
 from .channels import get_channel
 from .render import PushEvent, render_events
 from .smtp_config import SmtpConfigError, resolve_smtp_config
@@ -112,7 +113,8 @@ def run_push(rule_id: int, trigger_mode: str) -> None:
                 batch = results[i : i + batch_size]
                 events = [_to_push_event(db, r) for r in batch]
                 subject, html, text = render_events(rule.name, events)
-                channel.send(cfg, recipients, subject, html, text)
+                attachments = collect_attachments(db, batch)
+                channel.send(cfg, recipients, subject, html, text, attachments=attachments)
                 # 每批发送成功后立即推进水位线并提交
                 rule.last_pushed_result_id = batch[-1].id
                 db.commit()
