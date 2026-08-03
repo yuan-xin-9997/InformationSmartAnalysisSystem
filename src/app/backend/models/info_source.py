@@ -56,6 +56,9 @@ class InfoItem(Base):
     author_affiliation: Mapped[str | None] = mapped_column(String(256), nullable=True)
     article_published_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     page_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # 正文抽取来源：text_layer（PDF 文本层）/ vision_llm（视觉兜底）/ none（均未产出有效文本）。
+    # NULL 表示历史遗留条目（尚未重抽）。
+    extraction_method: Mapped[str | None] = mapped_column(String(32), nullable=True)
 
     source: Mapped[InfoSource] = relationship(back_populates="items")
     figures: Mapped[list["InfoItemFigure"]] = relationship(

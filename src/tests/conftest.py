@@ -20,6 +20,9 @@ os.environ.setdefault("ISAS_WEB_FETCH_API_KEY", "mock-wf-key")
 os.environ["ISAS_DB_PATH"] = str(_TMP / "test.sqlite3")
 os.environ["ISAS_LOG_DIR"] = str(_TMP / "logs")
 os.environ["ISAS_DATA_DIR"] = str(_TMP / "data")
+# 视觉兜底默认在测试中关闭，避免短文本 PDF 触发真实 HTTP；
+# 视觉相关用例通过 monkeypatch 单独启用。
+os.environ.setdefault("ISAS_EXTRACTION_VISION_FALLBACK", "false")
 _PW = _TMP / "password.txt"
 os.environ["ISAS_PASSWORD_FILE"] = str(_PW)
 _PW.write_text(

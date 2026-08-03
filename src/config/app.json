@@ -56,5 +56,13 @@
     "password": "",
     "from_email": "",
     "from_name": "信息智能分析系统"
+  },
+  "extraction": {
+    "vision_fallback": true,
+    "vision_model": "",
+    "max_ocr_pages": 10,
+    "min_text_length": 50,
+    "readable_ratio": 0.6,
+    "render_dpi": 150
   }
 }

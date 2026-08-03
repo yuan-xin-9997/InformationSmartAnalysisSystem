@@ -127,6 +127,28 @@ class Settings:
         self.email_from_email: str = _env("ISAS_EMAIL_FROM_EMAIL", em.get("from_email", ""))
         self.email_from_name: str = _env("ISAS_EMAIL_FROM_NAME", em.get("from_name", "信息智能分析系统"))
 
+        # 正文抽取策略（视觉 LLM 兜底）：当 PDF 文本层不可用时，把页面渲染成
+        # 图片调用多模态 LLM 提取正文。仅在文本层失败时触发，原生数字 PDF 无影响。
+        ex = raw.get("extraction", {})
+        self.extraction_vision_fallback: bool = _env(
+            "ISAS_EXTRACTION_VISION_FALLBACK", ex.get("vision_fallback", True)
+        ) in (True, "true", "True", 1, "1")
+        self.extraction_vision_model: str = _env(
+            "ISAS_EXTRACTION_VISION_MODEL", ex.get("vision_model", "")
+        )
+        self.extraction_max_ocr_pages: int = int(
+            _env("ISAS_EXTRACTION_MAX_OCR_PAGES", ex.get("max_ocr_pages", 10))
+        )
+        self.extraction_min_text_length: int = int(
+            _env("ISAS_EXTRACTION_MIN_TEXT_LENGTH", ex.get("min_text_length", 50))
+        )
+        self.extraction_readable_ratio: float = float(
+            _env("ISAS_EXTRACTION_READABLE_RATIO", ex.get("readable_ratio", 0.6))
+        )
+        self.extraction_render_dpi: int = int(
+            _env("ISAS_EXTRACTION_RENDER_DPI", ex.get("render_dpi", 150))
+        )
+
     @property
     def raw(self) -> dict[str, Any]:
         """The raw parsed ``app.json`` dict (for the system-config page)."""

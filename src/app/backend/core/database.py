@@ -60,6 +60,8 @@ def init_db() -> None:
     _ensure_column(engine, "info_items", "author_affiliation", "TEXT")
     _ensure_column(engine, "info_items", "article_published_at", "DATETIME")
     _ensure_column(engine, "info_items", "page_count", "INTEGER")
+    # InfoItem 正文抽取来源（enhance-pdf-content-extraction）。
+    _ensure_column(engine, "info_items", "extraction_method", "TEXT")
 
 
 def get_db() -> Iterator[Session]:

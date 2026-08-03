@@ -9,7 +9,7 @@ from __future__ import annotations
 import hashlib
 from pathlib import Path
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 
 from ...core.config import settings
 from ...core.database import SessionLocal
@@ -82,11 +82,12 @@ def _save_figures(
 
 
 def _apply_metadata(item: InfoItem, extra: dict) -> None:
-    """Copy the 4 metadata fields from an adapter ``extra`` dict onto an item."""
+    """Copy the metadata fields from an adapter ``extra`` dict onto an item."""
     item.author = extra.get("author")
     item.author_affiliation = extra.get("author_affiliation")
     item.article_published_at = extra.get("article_published_at")
     item.page_count = extra.get("page_count")
+    item.extraction_method = extra.get("extraction_method")
 
 
 def run_sync(run_id: int, source_id: int) -> None:
@@ -167,15 +168,27 @@ def run_sync(run_id: int, source_id: int) -> None:
                     )
                     updated_count += 1
 
-            # --- backfill: legacy items that lack metadata/figures (group 5.1) ---
+            # --- backfill: legacy items that lack metadata/figures, plus items
+            # whose body text never extracted cleanly (extraction_method='none'
+            # or empty content) so the vision fallback can retry them. ---
             backfill_count = 0
             if hasattr(adapter, "reextract") and source.type == "local_folder":
+                # Only target items that existed BEFORE this run
+                # (fetched_at < now). Newly created/updated items in this run
+                # already carry fresh extraction_method/figures; re-processing
+                # them here would double-save figures (their new-branch figure
+                # rows are still pending, autoflush=False) and add noise.
                 backfill_items = db.scalars(
                     select(InfoItem)
                     .where(
                         InfoItem.source_id == source_id,
-                        InfoItem.author.is_(None),
-                        InfoItem.page_count.is_(None),
+                        InfoItem.fetched_at < now,
+                        or_(
+                            InfoItem.author.is_(None)
+                            & InfoItem.page_count.is_(None),
+                            InfoItem.extraction_method == "none",
+                            InfoItem.content == "",
+                        ),
                     )
                     .limit(_BACKFILL_LIMIT)
                 ).all()
@@ -185,8 +198,14 @@ def run_sync(run_id: int, source_id: int) -> None:
                         continue
                     ch = _content_hash(data.content or data.external_id)
                     new_figs = data.extra.get("figures") or []
+                    # True only when the existing item still lacks a metadata
+                    # field that re-extraction can provide -- i.e. backfill would
+                    # actually fill something. Without this, items whose metadata
+                    # is already complete (e.g. extraction_method='none' items
+                    # retried each sync) would be re-written and re-analyzed
+                    # every run.
                     has_new_metadata = any(
-                        data.extra.get(k) is not None
+                        getattr(bf_item, k) is None and data.extra.get(k) is not None
                         for k in (
                             "author",
                             "author_affiliation",

@@ -243,6 +243,7 @@ def _result_out(
                 author_affiliation=item.author_affiliation,
                 published_at=item.article_published_at,
                 page_count=item.page_count,
+                extraction_method=item.extraction_method,
                 file_url=f"/api/info-sources/{r.source_id}/items/{item.id}/file",
                 figures=[
                     InfoItemFigureOut(

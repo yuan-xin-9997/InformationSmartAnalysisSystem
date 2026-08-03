@@ -546,3 +546,218 @@ def test_first_page_text_logs_warning_on_corrupted_pdf(tmp_path, caplog):
         r.levelno == logging.WARNING and "抽取首页文本失败" in r.getMessage()
         for r in caplog.records
     )
+
+
+# ---------- text quality heuristic (vision fallback trigger) ----------
+
+
+def test_text_quality_ok_normal_chinese():
+    from app.backend.services.info_source.local_folder import _text_quality_ok
+
+    text = "这是一段正常的中文正文，包含足够多的字符用于通过质量评估。" * 2
+    assert _text_quality_ok(text, 50, 0.6) is True
+
+
+def test_text_quality_ok_normal_english():
+    from app.backend.services.info_source.local_folder import _text_quality_ok
+
+    text = "This is a normal English paragraph with enough characters to pass the quality check."
+    assert _text_quality_ok(text, 50, 0.6) is True
+
+
+def test_text_quality_ok_empty():
+    from app.backend.services.info_source.local_folder import _text_quality_ok
+
+    assert _text_quality_ok("", 50, 0.6) is False
+
+
+def test_text_quality_ok_too_short():
+    from app.backend.services.info_source.local_folder import _text_quality_ok
+
+    assert _text_quality_ok("短文本", 50, 0.6) is False
+
+
+def test_text_quality_ok_garbled_pua():
+    """Private-Use-Area chars (typical of broken font mappings) -> not ok."""
+    from app.backend.services.info_source.local_folder import _text_quality_ok
+
+    garbled = "".join(chr(0xE000 + i % 100) for i in range(200))
+    assert _text_quality_ok(garbled, 50, 0.6) is False
+
+
+def test_text_quality_ok_symbol_heavy():
+    """Dense non-readable symbols (mathematical operators) -> not ok."""
+    from app.backend.services.info_source.local_folder import _text_quality_ok
+
+    symbols = "".join(chr(0x2200 + i % 100) for i in range(200))
+    assert _text_quality_ok(symbols, 50, 0.6) is False
+
+
+def test_readable_ratio_value():
+    from app.backend.services.info_source.local_folder import _readable_ratio
+
+    assert _readable_ratio("") == 0.0
+    assert _readable_ratio("测试内容") == 0.8  # 4 readable CJK + 1 PUA
+    assert _readable_ratio("hello 123") == 1.0  # all alphanumeric
+
+
+# ---------- vision-LLM fallback (PDF) ----------
+
+
+class _RecordingVisionLLM:
+    """Mock multimodal LLM: records chat_with_images calls."""
+
+    def __init__(self, *args, **kwargs):
+        self.model = kwargs.get("model")
+        self.img_calls: list[tuple] = []
+
+    def chat_with_images(self, system, user_text, images, mime="image/png"):
+        self.img_calls.append((user_text, len(images), mime))
+        return f"[第{len(self.img_calls)}页文本]"
+
+
+def _make_scanned_pdf(path: Path, pages: int = 1) -> None:
+    """A PDF with no text layer (scanned/image-only): ``get_text()`` returns ''."""
+    import fitz
+
+    doc = fitz.open()
+    for _ in range(pages):
+        doc.new_page()  # no insert_text -> empty text layer
+    doc.save(str(path))
+    doc.close()
+
+
+def _enable_vision(monkeypatch):
+    import app.backend.services.info_source.local_folder as lf
+
+    monkeypatch.setattr(lf.settings, "extraction_vision_fallback", True)
+
+
+_LONG_READABLE = "这是一段足够长的正常中文正文内容，用于通过文本层质量评估。" * 2
+
+
+def test_pdf_text_layer_ok_no_vision(monkeypatch, tmp_path):
+    """Readable text layer -> text_layer method, vision not called."""
+    _enable_vision(monkeypatch)
+    from app.backend.services.info_source.local_folder import _extract_pdf_content
+
+    pdf = tmp_path / "doc.pdf"
+    _make_pdf(pdf, text_lines=[_LONG_READABLE])
+    llm = _RecordingVisionLLM()
+    content, method = _extract_pdf_content(pdf, llm_client=llm)
+    assert method == "text_layer"
+    assert llm.img_calls == []  # no vision call
+    assert "正常中文正文" in content
+
+
+def test_pdf_scanned_triggers_vision(monkeypatch, tmp_path):
+    """Empty text layer (scanned) + vision enabled -> vision_llm."""
+    _enable_vision(monkeypatch)
+    from app.backend.services.info_source.local_folder import _extract_pdf_content
+
+    pdf = tmp_path / "scan.pdf"
+    _make_scanned_pdf(pdf, pages=1)
+    llm = _RecordingVisionLLM()
+    content, method = _extract_pdf_content(pdf, llm_client=llm)
+    assert method == "vision_llm"
+    assert len(llm.img_calls) == 1
+    assert content == "[第1页文本]"
+
+
+def test_pdf_max_ocr_pages_truncate(monkeypatch, tmp_path, caplog):
+    """Pages beyond max_ocr_pages are dropped with a warning log."""
+    import logging
+
+    _enable_vision(monkeypatch)
+    import app.backend.services.info_source.local_folder as lf
+
+    monkeypatch.setattr(lf.settings, "extraction_max_ocr_pages", 2)
+    from app.backend.services.info_source.local_folder import _extract_pdf_content
+
+    pdf = tmp_path / "big.pdf"
+    _make_scanned_pdf(pdf, pages=5)
+    llm = _RecordingVisionLLM()
+    with caplog.at_level(logging.WARNING, logger="local_folder"):
+        content, method = _extract_pdf_content(pdf, llm_client=llm)
+    assert method == "vision_llm"
+    assert len(llm.img_calls) == 2  # only 2 of 5 pages
+    assert any("仅处理前 2 页" in r.getMessage() for r in caplog.records)
+
+
+def test_vision_failure_degrades_to_none(monkeypatch, tmp_path):
+    """Vision LLM raises -> degrade to extraction_method=none, no exception."""
+
+    _enable_vision(monkeypatch)
+    from app.backend.services.info_source.local_folder import _extract_pdf_content
+
+    class _FailingLLM:
+        def chat_with_images(self, *a, **kw):
+            raise RuntimeError("vision endpoint down")
+
+    pdf = tmp_path / "scan.pdf"
+    _make_scanned_pdf(pdf, pages=1)
+    content, method = _extract_pdf_content(pdf, llm_client=_FailingLLM())
+    assert method == "none"
+    assert content == ""  # text layer was empty, vision failed
+
+
+def test_vision_disabled_uses_text_layer_only(monkeypatch, tmp_path):
+    """vision_fallback=False -> no vision call even when text layer is poor."""
+    import app.backend.services.info_source.local_folder as lf
+
+    monkeypatch.setattr(lf.settings, "extraction_vision_fallback", False)
+    from app.backend.services.info_source.local_folder import _extract_pdf_content
+
+    pdf = tmp_path / "scan.pdf"
+    _make_scanned_pdf(pdf, pages=1)
+    llm = _RecordingVisionLLM()
+    content, method = _extract_pdf_content(pdf, llm_client=llm)
+    assert method == "none"
+    assert llm.img_calls == []
+    assert content == ""
+
+
+def test_vision_model_independent_config(monkeypatch, tmp_path):
+    """vision_model is used when constructing the LLMClient (not llm.model)."""
+    _enable_vision(monkeypatch)
+    import app.backend.services.analysis.llm_client as llm_mod
+    import app.backend.services.info_source.local_folder as lf
+
+    monkeypatch.setattr(lf.settings, "extraction_vision_model", "gpt-4o")
+
+    captured: dict = {}
+
+    class _MockLLMClass:
+        def __init__(self, *args, **kwargs):
+            captured["model"] = kwargs.get("model")
+
+        def chat_with_images(self, *a, **kw):
+            return "vision text"
+
+    monkeypatch.setattr(llm_mod, "LLMClient", _MockLLMClass)
+    from app.backend.services.info_source.local_folder import _extract_pdf_content
+
+    pdf = tmp_path / "scan.pdf"
+    _make_scanned_pdf(pdf, pages=1)
+    content, method = _extract_pdf_content(pdf, llm_client=None)  # construct internally
+    assert method == "vision_llm"
+    assert captured["model"] == "gpt-4o"
+
+
+def test_extract_full_carries_extraction_method(tmp_path):
+    """_extract_full packs extraction_method into InfoItemData.extra."""
+    from app.backend.services.info_source.local_folder import _extract_full
+
+    # Short text + vision disabled (conftest default) -> method 'none'
+    pdf = tmp_path / "short.pdf"
+    _make_pdf(pdf, text_lines=["短文本"])
+    data = _extract_full(pdf)
+    assert data is not None
+    assert data.extra["extraction_method"] == "none"
+
+    # Long readable text -> 'text_layer'
+    pdf2 = tmp_path / "long.pdf"
+    _make_pdf(pdf2, text_lines=[_LONG_READABLE])
+    data2 = _extract_full(pdf2)
+    assert data2 is not None
+    assert data2.extra["extraction_method"] == "text_layer"

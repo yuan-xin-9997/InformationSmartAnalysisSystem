@@ -566,3 +566,161 @@ def test_sync_update_branch_updates_metadata(db_session, tmp_path):
         figs = db.query(InfoItemFigure).filter(InfoItemFigure.item_id == item_id).all()
         assert len(figs) == 1
         assert figs[0].width == 2  # new image, not 9
+
+
+# ---------- extraction_method persistence + vision backfill retry ----------
+
+
+_LONG_READABLE = "这是一段足够长的正常中文正文内容，用于通过文本层质量评估。" * 2
+
+
+def test_sync_new_item_persists_extraction_method(db_session, tmp_path):
+    """First sync of a readable-text PDF records extraction_method='text_layer'."""
+    from app.backend.models.info_source import InfoItem
+    from app.backend.services.info_source.sync import run_sync
+
+    pdf = tmp_path / "doc.pdf"
+    _make_pdf(pdf, title="T", author="A", text_lines=[_LONG_READABLE])
+    source_id = _make_source(db_session, tmp_path)
+    run_id = _make_task_run(db_session, source_id)
+    db_session.close()
+
+    run_sync(run_id, source_id)
+
+    with _new_session() as db:
+        item = db.query(InfoItem).filter(InfoItem.source_id == source_id).one()
+        assert item.extraction_method == "text_layer"
+
+
+def test_backfill_retries_none_item_with_vision(monkeypatch, db_session, tmp_path):
+    """A 'none' item is re-extracted via vision when fallback is enabled:
+    content updates, method becomes 'vision_llm', analyzed resets."""
+    import app.backend.services.analysis.llm_client as llm_mod
+    import app.backend.services.info_source.local_folder as lf
+    from app.backend.models.info_source import InfoItem, InfoSource
+    from app.backend.services.info_source.sync import run_sync
+
+    monkeypatch.setattr(lf.settings, "extraction_vision_fallback", True)
+
+    class _MockLLM:
+        def __init__(self, *a, **kw):
+            pass
+
+        def chat_with_images(self, system, user_text, images, mime="image/png"):
+            return "视觉提取的正文内容"
+
+    monkeypatch.setattr(llm_mod, "LLMClient", _MockLLM)
+
+    # Short text -> poor text layer -> triggers vision fallback.
+    pdf = tmp_path / "scan.pdf"
+    _make_pdf(pdf, title="T", author="A", text_lines=["短"])
+    source_id = _make_source(db_session, tmp_path)
+
+    import hashlib
+
+    real_hash = hashlib.sha256("短".encode("utf-8")).hexdigest()
+    item = InfoItem(
+        source_id=source_id,
+        external_id=str(pdf.resolve()),
+        title="T",
+        content="短",
+        content_hash=real_hash,
+        author="A",
+        page_count=1,
+        extraction_method="none",
+        analyzed=True,
+    )
+    db_session.add(item)
+    db_session.commit()
+    item_id = item.id
+
+    src = db_session.get(InfoSource, source_id)
+    src.last_sync_at = datetime.now(timezone.utc) + timedelta(hours=1)
+    db_session.commit()
+    run_id = _make_task_run(db_session, source_id)
+    db_session.close()
+
+    run_sync(run_id, source_id)
+
+    with _new_session() as db:
+        refreshed = db.get(InfoItem, item_id)
+        assert refreshed.extraction_method == "vision_llm"
+        assert refreshed.content == "视觉提取的正文内容"
+        assert refreshed.analyzed is False  # content changed -> reset
+
+
+def test_backfill_skips_none_item_when_vision_off(db_session, tmp_path):
+    """A 'none' item with complete metadata + unchanged content is NOT re-written
+    when vision is off (no noise, no analyzed reset)."""
+    import hashlib
+
+    from app.backend.models.info_source import InfoItem, InfoSource
+    from app.backend.models.task import TaskRun
+    from app.backend.services.info_source.sync import run_sync
+
+    pdf = tmp_path / "doc.pdf"
+    _make_pdf(pdf, title="T", author="A", text_lines=["短"])
+    source_id = _make_source(db_session, tmp_path)
+    real_hash = hashlib.sha256("短".encode("utf-8")).hexdigest()
+    item = InfoItem(
+        source_id=source_id,
+        external_id=str(pdf.resolve()),
+        title="T",
+        content="短",
+        content_hash=real_hash,
+        author="A",
+        page_count=1,
+        extraction_method="none",
+        analyzed=True,
+    )
+    db_session.add(item)
+    db_session.commit()
+    item_id = item.id
+
+    src = db_session.get(InfoSource, source_id)
+    src.last_sync_at = datetime.now(timezone.utc) + timedelta(hours=1)
+    db_session.commit()
+    run_id = _make_task_run(db_session, source_id)
+    db_session.close()
+
+    run_sync(run_id, source_id)
+
+    with _new_session() as db:
+        run = db.get(TaskRun, run_id)
+        assert "更新 0 条" in run.summary
+        refreshed = db.get(InfoItem, item_id)
+        assert refreshed.analyzed is True  # not reset
+        assert refreshed.extraction_method == "none"  # unchanged
+
+
+def test_reextract_item_sets_extraction_method_and_resets_analyzed(
+    db_session, tmp_path
+):
+    """reextract_item re-runs text-layer+vision and updates extraction_method;
+    analyzed is reset so the item gets re-analyzed."""
+    from app.backend.models.info_source import InfoItem
+    from app.backend.services.info_source.sync import reextract_item
+
+    pdf = tmp_path / "doc.pdf"
+    _make_pdf(pdf, title="T", author="A", text_lines=[_LONG_READABLE])
+    source_id = _make_source(db_session, tmp_path)
+    item = InfoItem(
+        source_id=source_id,
+        external_id=str(pdf.resolve()),
+        title="old",
+        content="old",
+        content_hash="old",
+        extraction_method="none",
+        analyzed=True,
+    )
+    db_session.add(item)
+    db_session.commit()
+    item_id = item.id
+    db_session.close()
+
+    reextract_item(source_id, item_id)
+
+    with _new_session() as db:
+        refreshed = db.get(InfoItem, item_id)
+        assert refreshed.extraction_method == "text_layer"
+        assert refreshed.analyzed is False

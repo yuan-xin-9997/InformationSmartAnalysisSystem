@@ -48,12 +48,45 @@ class LLMClient:
             )
 
     def chat(self, system: str, user: str) -> str:
+        messages = [
+            {"role": "system", "content": system},
+            {"role": "user", "content": user},
+        ]
+        return self._post_chat(messages)
+
+    def chat_with_images(
+        self,
+        system: str,
+        user_text: str,
+        images: list[bytes],
+        mime: str = "image/png",
+    ) -> str:
+        """Send a multimodal (vision) request: text + one or more images.
+
+        Uses the OpenAI vision message format (``image_url`` with a base64 data
+        URI). ``images`` are raw image bytes (rendered/encoded by the caller).
+        Reuses the same model/timeout/retry as ``chat``.
+        """
+        import base64
+
+        content: list[dict[str, Any]] = [{"type": "text", "text": user_text}]
+        data_uri_prefix = f"data:{mime};base64,"
+        for img in images:
+            b64 = base64.b64encode(img).decode("ascii")
+            content.append(
+                {"type": "image_url", "image_url": {"url": f"{data_uri_prefix}{b64}"}}
+            )
+        messages = [
+            {"role": "system", "content": system},
+            {"role": "user", "content": content},
+        ]
+        return self._post_chat(messages)
+
+    def _post_chat(self, messages: list[dict[str, Any]]) -> str:
+        """POST ``/chat/completions`` with one retry on timeout; return text."""
         payload: dict[str, Any] = {
             "model": self.model,
-            "messages": [
-                {"role": "system", "content": system},
-                {"role": "user", "content": user},
-            ],
+            "messages": messages,
             "temperature": self.temperature,
             "max_tokens": self.max_tokens,
         }

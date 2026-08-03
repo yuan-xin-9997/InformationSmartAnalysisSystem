@@ -53,6 +53,17 @@
 
 `per_item` 事件邮件还会附带附件：文章原文件（`local_folder` 源，PDF/docx/txt/md/html）与内嵌图表图片。附件读取复用文件服务的路径校验防穿越；单文件超 10MB 或不存在时跳过该附件并记日志，不中断推送。`aggregate` 事件无附件。
 
+## PDF 正文抽取（视觉兜底）
+
+`local_folder` 源的 PDF 正文抽取优先读取**文本层**（PyMuPDF `page.get_text()`）。对**扫描件/图片型 PDF**（无文本层）或**字体编码损坏的 PDF**（缺 `ToUnicode CMap`），文本层会返回空串或乱码，导致 LLM 收到"无意义编码字符串"无法分析。
+
+为此系统新增**视觉 LLM 兜底**：当文本层质量不达标（为空、过短、或可读字符占比低于阈值）时，把 PDF 页面渲染成图片，逐页调用多模态 LLM 提取正文文本，作为 `InfoItem.content` 落库。抽取流程保持"先抽取、后分析"，分析侧无感知。
+
+- **抽取来源**记录在 `InfoItem.extraction_method`：`text_layer`（文本层可用）/ `vision_llm`（视觉兜底成功）/ `none`（均未产出有效文本），并在分析结果接口只读返回，便于追溯。
+- **优雅降级**：视觉兜底未启用、LLM 未配置、或模型不支持视觉/调用失败时，记录警告并保留原文本层内容，不中断同步或分析。
+- **历史回补**：`extraction_method='none'` 或 `content` 为空的历史条目，会在同步 backfill 与手动重抽（`POST /api/info-sources/{source_id}/items/{item_id}/reextract`）时自动重新走"文本层 + 视觉兜底"。
+- **部署注意**：视觉兜底需要配置一个**支持视觉的多模态 LLM**（默认 `llm.model=gpt-4o-mini` 已支持）。若分析模型不支持视觉，可单独配置 `extraction.vision_model` 指向支持视觉的模型。兜底按页消耗 LLM token，受 `max_ocr_pages` 上限约束。
+
 ## 配置
 
 主配置文件 `config/app.json`，支持 `ISAS_*` 环境变量覆盖。本次新增配置项：
@@ -61,9 +72,15 @@
 |---|---|---|---|
 | `figures_dir` | `data/figures`（即 `data_dir/figures`） | `ISAS_FIGURES_DIR` | 内嵌图表落盘根目录，启动时自动创建 |
 | `max_figures_per_item` | `20` | `ISAS_MAX_FIGURES_PER_ITEM` | 单文件图表抽取上限，超出截断并记日志 |
+| `extraction.vision_fallback` | `true` | `ISAS_EXTRACTION_VISION_FALLBACK` | 是否启用 PDF 视觉 LLM 兜底抽取 |
+| `extraction.vision_model` | `""`（复用 `llm.model`） | `ISAS_EXTRACTION_VISION_MODEL` | 视觉兜底专用模型，留空则复用 `llm.model` |
+| `extraction.max_ocr_pages` | `10` | `ISAS_EXTRACTION_MAX_OCR_PAGES` | 单文件视觉兜底最大渲染页数，超出截断并记日志 |
+| `extraction.min_text_length` | `50` | `ISAS_EXTRACTION_MIN_TEXT_LENGTH` | 文本层可读非空白字符数下限，低于则判定不可用 |
+| `extraction.readable_ratio` | `0.6` | `ISAS_EXTRACTION_READABLE_RATIO` | 文本层可读字符占比阈值，低于则判定不可用 |
+| `extraction.render_dpi` | `150` | `ISAS_EXTRACTION_RENDER_DPI` | 视觉兜底页面渲染 DPI（清晰度与 token 成本平衡） |
 
 ## 部署
 
 ### 存量回填
 
-首次部署后，对现有 `local_folder` 信息源触发一次同步（同步会补齐存量元数据/图表），或对单个文件调用 `POST /api/info-sources/{source_id}/items/{item_id}/reextract` 手动重新抽取。
+首次部署后，对现有 `local_folder` 信息源触发一次同步（同步会补齐存量元数据/图表，并对 `extraction_method='none'` 或 `content` 为空的历史条目重新走视觉兜底），或对单个文件调用 `POST /api/info-sources/{source_id}/items/{item_id}/reextract` 手动重新抽取。重抽后该条目 `analyzed` 置回 False，下次分析任务会自动重新分析。

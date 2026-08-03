@@ -35,6 +35,7 @@ def _seed(db) -> tuple[int, int]:
         author_affiliation="某研究院",
         article_published_at=datetime(2026, 1, 15, 3, 30, tzinfo=timezone.utc),
         page_count=7,
+        extraction_method="vision_llm",
     )
     db.add(item)
     db.commit()
@@ -128,6 +129,7 @@ def test_per_item_result_carries_source_file(client, admin_headers):
     assert sf["author"] == "张三"
     assert sf["author_affiliation"] == "某研究院"
     assert sf["page_count"] == 7
+    assert sf["extraction_method"] == "vision_llm"
     # published_at 序列化为北京时间 ISO 字符串（UTC 03:30 -> Beijing 11:30）
     assert sf["published_at"].startswith("2026-01-15T11:30")
     assert sf["file_url"] == f"/api/info-sources/{per['source_id']}/items/{per['info_item_id']}/file"
@@ -194,6 +196,7 @@ def test_schema_serialization_per_item_and_aggregate():
         author_affiliation="某大学",
         published_at=datetime(2026, 2, 1, 0, 0, tzinfo=timezone.utc),
         page_count=3,
+        extraction_method="text_layer",
         file_url="/api/info-sources/1/items/1/file",
         figures=[
             InfoItemFigureOut(index=0, url="/api/info-sources/1/items/1/figures/0", mime="image/png", width=10, height=20),
@@ -214,6 +217,7 @@ def test_schema_serialization_per_item_and_aggregate():
     dumped = per.model_dump(mode="json")
     assert dumped["source_file"] is not None
     assert dumped["source_file"]["filename"] == "doc.pdf"
+    assert dumped["source_file"]["extraction_method"] == "text_layer"
     assert dumped["source_file"]["figures"][0]["index"] == 0
     assert dumped["source_file"]["published_at"].startswith("2026-02-01T08:00")  # UTC 00:00 -> Beijing 08:00
 

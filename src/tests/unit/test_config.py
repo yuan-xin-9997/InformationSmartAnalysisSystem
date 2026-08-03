@@ -135,3 +135,73 @@ def test_max_figures_per_item_config_file_override(monkeypatch, tmp_path):
     monkeypatch.delenv("ISAS_MAX_FIGURES_PER_ITEM", raising=False)
     s = Settings()
     assert s.max_figures_per_item == 99
+
+
+# ---------- extraction (vision-LLM fallback) settings ----------
+
+
+def test_extraction_settings_defaults(monkeypatch):
+    """extraction 节默认值（env 缺省时）：兜底启用、模型留空复用 llm.model、阈值与页数上限。"""
+    from app.backend.core.config import Settings
+
+    for var in (
+        "ISAS_EXTRACTION_VISION_FALLBACK",
+        "ISAS_EXTRACTION_VISION_MODEL",
+        "ISAS_EXTRACTION_MAX_OCR_PAGES",
+        "ISAS_EXTRACTION_MIN_TEXT_LENGTH",
+        "ISAS_EXTRACTION_READABLE_RATIO",
+        "ISAS_EXTRACTION_RENDER_DPI",
+    ):
+        monkeypatch.delenv(var, raising=False)
+    s = Settings()
+    assert s.extraction_vision_fallback is True
+    assert s.extraction_vision_model == ""
+    assert s.extraction_max_ocr_pages == 10
+    assert s.extraction_min_text_length == 50
+    assert s.extraction_readable_ratio == 0.6
+    assert s.extraction_render_dpi == 150
+
+
+def test_extraction_env_override(monkeypatch):
+    """ISAS_EXTRACTION_* 环境变量覆盖默认值。"""
+    from app.backend.core.config import Settings
+
+    monkeypatch.setenv("ISAS_EXTRACTION_VISION_FALLBACK", "false")
+    monkeypatch.setenv("ISAS_EXTRACTION_VISION_MODEL", "gpt-4o")
+    monkeypatch.setenv("ISAS_EXTRACTION_MAX_OCR_PAGES", "5")
+    monkeypatch.setenv("ISAS_EXTRACTION_MIN_TEXT_LENGTH", "100")
+    monkeypatch.setenv("ISAS_EXTRACTION_READABLE_RATIO", "0.8")
+    monkeypatch.setenv("ISAS_EXTRACTION_RENDER_DPI", "200")
+    s = Settings()
+    assert s.extraction_vision_fallback is False
+    assert s.extraction_vision_model == "gpt-4o"
+    assert s.extraction_max_ocr_pages == 5
+    assert s.extraction_min_text_length == 100
+    assert s.extraction_readable_ratio == 0.8
+    assert s.extraction_render_dpi == 200
+
+
+def test_extraction_config_file_override(monkeypatch, tmp_path):
+    """app.json extraction 节在 env 缺省时生效。"""
+    import json
+
+    from app.backend.core.config import Settings
+
+    cfg = tmp_path / "app.json"
+    cfg.write_text(
+        json.dumps(
+            {"extraction": {"vision_fallback": False, "max_ocr_pages": 3, "render_dpi": 120}}
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("ISAS_CONFIG", str(cfg))
+    for var in (
+        "ISAS_EXTRACTION_VISION_FALLBACK",
+        "ISAS_EXTRACTION_MAX_OCR_PAGES",
+        "ISAS_EXTRACTION_RENDER_DPI",
+    ):
+        monkeypatch.delenv(var, raising=False)
+    s = Settings()
+    assert s.extraction_vision_fallback is False
+    assert s.extraction_max_ocr_pages == 3
+    assert s.extraction_render_dpi == 120

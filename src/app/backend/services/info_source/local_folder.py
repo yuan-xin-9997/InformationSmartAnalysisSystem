@@ -4,10 +4,16 @@ Extracts plain text, article metadata (title/author/affiliation/published_at/
 page_count) and embedded figures from local files (txt/md/html/pdf/docx).
 ``extract_figures`` returns raw bytes only -- ``sync.py`` owns disk persistence
 (it has ``settings.figures_dir`` and the ``item_id``).
+
+For PDFs whose text layer is empty or garbled (scanned / broken-font encoding),
+a vision-LLM fallback renders pages to images and extracts text via a
+multimodal LLM. The quality of the text-layer output is judged by a readable
+character ratio; only when it falls below threshold is the fallback engaged.
 """
 from __future__ import annotations
 
 import re
+import string
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -29,6 +35,48 @@ _AFFILIATION_RE = re.compile(
 _PDF_DATE_RE = re.compile(
     r"D:(\d{4})(\d{2})(\d{2})(\d{2})?(\d{2})?(\d{2})?([+-]\d{2})?'?(\d{2})?'?"
 )
+
+# Readable-character set for text-quality scoring: CJK Unified Ideographs,
+# ASCII alphanumerics, and common punctuation (ASCII + CJK). Garbled PDF text
+# (Private-Use-Area glyphs, mathematical/geometric symbols, replacement chars)
+# falls outside this set and drives the readable ratio down.
+_CJK_PUNCT = "，。；：！？、（）《》【】「」“”‘’－…·～"
+_READABLE_PUNCT = frozenset(string.punctuation + _CJK_PUNCT)
+
+
+def _is_readable_char(ch: str) -> bool:
+    """True for CJK ideographs, ASCII alphanumerics, or common punctuation."""
+    code = ord(ch)
+    if 0x4E00 <= code <= 0x9FFF:  # CJK Unified Ideographs
+        return True
+    if ch in _READABLE_PUNCT:
+        return True
+    if ch.isascii() and ch.isalnum():  # a-z A-Z 0-9
+        return True
+    return False
+
+
+def _readable_ratio(text: str) -> float:
+    """Readable (non-whitespace) chars / total non-whitespace chars; 0.0 if empty."""
+    non_ws = [ch for ch in text if not ch.isspace()]
+    if not non_ws:
+        return 0.0
+    readable = sum(1 for ch in non_ws if _is_readable_char(ch))
+    return readable / len(non_ws)
+
+
+def _text_quality_ok(text: str, min_length: int, readable_ratio_threshold: float) -> bool:
+    """True when the text-layer output is usable (non-empty, long enough, readable).
+
+    Returns False for empty / too-short / garbled text -- the signal to engage
+    the vision-LLM fallback.
+    """
+    if not text:
+        return False
+    non_ws_len = sum(1 for ch in text if not ch.isspace())
+    if non_ws_len < min_length:
+        return False
+    return _readable_ratio(text) >= readable_ratio_threshold
 
 
 # ---------- text extraction ----------
@@ -59,6 +107,101 @@ def _extract_pdf(path: Path) -> str:
     with fitz.open(path) as doc:
         for page in doc:
             parts.append(page.get_text())
+    return "\n".join(parts).strip()
+
+
+def _extract_pdf_content(path: Path, llm_client=None) -> tuple[str | None, str]:
+    """Extract PDF body text + ``extraction_method``.
+
+    Tries the text layer first; if its quality is poor (empty/garbled) and the
+    vision fallback is enabled, renders pages to images and uses a multimodal
+    LLM to extract text. Returns ``(content, method)`` where method is
+    ``text_layer`` | ``vision_llm`` | ``none``. ``content`` is ``None`` only
+    when the text layer itself cannot be read (corrupt file) so the caller
+    skips the item; an empty-but-readable text layer yields ``('', ...)``.
+    """
+    try:
+        text_layer = _extract_pdf(path)
+    except Exception:
+        _logger.warning("PDF 文本层读取失败: %s", path, exc_info=True)
+        return None, "none"
+
+    if _text_quality_ok(
+        text_layer or "",
+        settings.extraction_min_text_length,
+        settings.extraction_readable_ratio,
+    ):
+        return text_layer, "text_layer"
+
+    if not settings.extraction_vision_fallback:
+        _logger.info("PDF 文本层质量不佳且视觉兜底未启用，保留原文本: %s", path)
+        return text_layer, "none"
+
+    vision_text = _vision_extract_pdf(path, llm_client)
+    if vision_text:
+        return vision_text, "vision_llm"
+    _logger.warning("视觉兜底未产出文本，保留原文本层: %s", path)
+    return text_layer, "none"
+
+
+def _vision_extract_pdf(path: Path, llm_client=None) -> str:
+    """Render PDF pages to images and extract text via a multimodal LLM.
+
+    Returns concatenated page text (may be partial), or ``""`` on failure.
+    Never raises -- graceful degradation. Respects ``max_ocr_pages`` and
+    ``render_dpi``; logs a warning when pages are truncated.
+    """
+    import fitz  # noqa: F401  (PyMuPDF; used for rendering below)
+
+    from ..analysis.llm_client import LLMClient, LLMError
+
+    max_pages = settings.extraction_max_ocr_pages
+    dpi = settings.extraction_render_dpi
+    vision_model = settings.extraction_vision_model or None
+
+    if llm_client is None:
+        try:
+            llm_client = LLMClient(model=vision_model)
+        except LLMError as exc:
+            _logger.warning("视觉兜底 LLM 未就绪，跳过: %s", exc)
+            return ""
+
+    system = (
+        "你是一个文档文本提取助手。请提取并原样输出图片中文档的全部正文文本，"
+        "保留段落与换行结构，仅输出文本本身，不要解说、不要补充。"
+    )
+    parts: list[str] = []
+    try:
+        with fitz.open(path) as doc:
+            total = doc.page_count
+            pages_to_render = min(total, max_pages)
+            if total > max_pages:
+                _logger.warning(
+                    "PDF 共 %d 页，视觉兜底仅处理前 %d 页（max_ocr_pages）: %s",
+                    total,
+                    max_pages,
+                    path,
+                )
+            for i in range(pages_to_render):
+                pix = doc[i].get_pixmap(dpi=dpi)
+                img_bytes = pix.tobytes("png")
+                user = (
+                    f"请提取这张文档图片（第 {i + 1} 页，共 {total} 页）的全部正文文本。"
+                )
+                try:
+                    page_text = llm_client.chat_with_images(
+                        system, user, [img_bytes]
+                    )
+                except Exception as exc:  # noqa: BLE001 (per-page degrade)
+                    _logger.warning(
+                        "视觉兜底第 %d 页提取失败，跳过该页: %s", i + 1, exc
+                    )
+                    continue
+                if page_text and page_text.strip():
+                    parts.append(page_text.strip())
+    except Exception as exc:  # noqa: BLE001 (render-level degrade)
+        _logger.warning("视觉兜底渲染失败: %s (%s)", path, exc)
+        return ""
     return "\n".join(parts).strip()
 
 
@@ -378,13 +521,30 @@ def _jpeg_size(data: bytes) -> tuple[int, int] | None:
 # ---------- full extraction (text + metadata + figures) ----------
 
 
-def _extract_full(path: Path) -> InfoItemData | None:
+def _extract_content(path: Path, llm_client=None) -> tuple[str | None, str]:
+    """Return ``(content, extraction_method)`` for any supported file.
+
+    ``content`` is ``None`` only when text extraction fails (corrupt /
+    unsupported) -- the caller then skips the item. ``extraction_method`` is
+    ``text_layer`` | ``vision_llm`` | ``none``.
+    """
+    suffix = path.suffix.lower()
+    if suffix == ".pdf":
+        return _extract_pdf_content(path, llm_client)
+    text = extract_text(path)
+    if text is None:
+        return None, "none"
+    return text, "text_layer"
+
+
+def _extract_full(path: Path, llm_client=None) -> InfoItemData | None:
     """Extract text + metadata + figures, packed into ``InfoItemData.extra``.
 
     Returns ``None`` if text extraction fails. Title falls back to the filename
-    when metadata has no title.
+    when metadata has no title. ``extraction_method`` records how the body text
+    was obtained (text_layer / vision_llm / none).
     """
-    content = extract_text(path)
+    content, extraction_method = _extract_content(path, llm_client)
     if content is None:
         return None
     metadata = extract_metadata(path)
@@ -409,6 +569,7 @@ def _extract_full(path: Path) -> InfoItemData | None:
             "article_published_at": metadata.get("published_at"),
             "page_count": metadata.get("page_count"),
             "figures": figures,
+            "extraction_method": extraction_method,
         },
     )
 
