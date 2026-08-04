@@ -31,7 +31,7 @@ _logger = get_logger("push")
 
 def _collect_events(db, rule: PushRule) -> list[AnalysisResult]:
     q = db.query(AnalysisResult).filter(
-        AnalysisResult.task_id.in_(rule.task_ids or []),
+        AnalysisResult.task_id == rule.task_id,
         AnalysisResult.result_type.in_(rule.event_types or []),
     )
     if rule.last_pushed_result_id is not None:
@@ -126,7 +126,7 @@ def run_push(rule_id: int, trigger_mode: str) -> None:
 
 
 def on_analysis_completed(task_id: int) -> None:
-    """分析任务成功完成后：为匹配的 on_run 规则触发增量推送。
+    """分析任务成功完成后：为匹配的 on_run 推送配置触发增量推送（1:1，按 task_id）。
 
     异常隔离：任何错误仅记日志，不得影响已成功的分析结果。
     """
@@ -134,10 +134,14 @@ def on_analysis_completed(task_id: int) -> None:
         with SessionLocal() as db:
             rules = (
                 db.query(PushRule)
-                .filter(PushRule.enabled.is_(True), PushRule.trigger_mode == "on_run")
+                .filter(
+                    PushRule.enabled.is_(True),
+                    PushRule.trigger_mode == "on_run",
+                    PushRule.task_id == task_id,
+                )
                 .all()
             )
-            ids = [r.id for r in rules if task_id in (r.task_ids or [])]
+            ids = [r.id for r in rules]
         for rid in ids:
             worker.submit(run_push, rid, "on_run")
     except Exception:  # noqa: BLE001

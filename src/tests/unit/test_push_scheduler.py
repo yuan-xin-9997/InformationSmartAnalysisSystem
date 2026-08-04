@@ -33,7 +33,7 @@ def test_add_push_job_registers_cron(client, monkeypatch):
         trigger_mode="scheduled",
         enabled=True,
         cron_expr="*/5 * * * *",
-        task_ids=[],
+        task_id=None,
         event_types=["per_item"],
         recipients=["a@x.com"],
     )
@@ -49,7 +49,7 @@ def test_add_push_job_skips_non_scheduled(client, monkeypatch):
         name="r",
         trigger_mode="manual",
         enabled=True,
-        task_ids=[],
+        task_id=None,
         event_types=["per_item"],
         recipients=["a@x.com"],
     )
@@ -74,7 +74,7 @@ def test_reschedule_push_job(client, monkeypatch):
         trigger_mode="scheduled",
         enabled=True,
         interval_seconds=120,
-        task_ids=[],
+        task_id=None,
         event_types=["per_item"],
         recipients=["a@x.com"],
     )
@@ -86,9 +86,9 @@ def test_start_push_scheduler_loads_only_enabled_scheduled(client, monkeypatch):
     fake = _FakeSched()
     _patch_sched(monkeypatch, fake)
     with SessionLocal() as db:
-        db.add(PushRule(name="on", trigger_mode="scheduled", enabled=True, cron_expr="* * * * *", task_ids=[1], event_types=["per_item"], recipients=["a@x.com"]))
-        db.add(PushRule(name="off", trigger_mode="scheduled", enabled=False, cron_expr="* * * * *", task_ids=[1], event_types=["per_item"], recipients=["a@x.com"]))
-        db.add(PushRule(name="manual", trigger_mode="manual", enabled=True, task_ids=[1], event_types=["per_item"], recipients=["a@x.com"]))
+        db.add(PushRule(name="on", trigger_mode="scheduled", enabled=True, cron_expr="* * * * *", task_id=None, event_types=["per_item"], recipients=["a@x.com"]))
+        db.add(PushRule(name="off", trigger_mode="scheduled", enabled=False, cron_expr="* * * * *", task_id=None, event_types=["per_item"], recipients=["a@x.com"]))
+        db.add(PushRule(name="manual", trigger_mode="manual", enabled=True, task_id=None, event_types=["per_item"], recipients=["a@x.com"]))
         db.commit()
     push_sched.start_push_scheduler()
     assert len(fake.jobs) == 1  # 只加载 enabled & scheduled
@@ -97,6 +97,6 @@ def test_start_push_scheduler_loads_only_enabled_scheduled(client, monkeypatch):
 def test_start_push_scheduler_no_scheduler_is_noop(client, monkeypatch):
     monkeypatch.setattr(push_sched.sched_svc, "get_scheduler", lambda: None)
     with SessionLocal() as db:
-        db.add(PushRule(name="on", trigger_mode="scheduled", enabled=True, cron_expr="* * * * *", task_ids=[1], event_types=["per_item"], recipients=["a@x.com"]))
+        db.add(PushRule(name="on", trigger_mode="scheduled", enabled=True, cron_expr="* * * * *", task_id=None, event_types=["per_item"], recipients=["a@x.com"]))
         db.commit()
     push_sched.start_push_scheduler()  # 不抛异常

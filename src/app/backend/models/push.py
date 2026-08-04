@@ -1,15 +1,21 @@
 """Push-rule, push-run (history) and SMTP-config models.
 
-A ``PushRule`` is an admin-defined subscription: which analysis tasks, which
-event types (``AnalysisResult.result_type``), which recipients, and a trigger
-mode (``on_run`` / ``scheduled`` / ``manual``). It carries a single watermark
+A ``PushRule`` is an admin-defined subscription belonging to exactly one
+analysis task (1:1 via ``task_id``): which event types
+(``AnalysisResult.result_type``), which recipients, and a trigger mode
+(``on_run`` / ``scheduled`` / ``manual``). It carries a single watermark
 ``last_pushed_result_id`` (``AnalysisResult.id`` is globally monotonic, so one
-value per rule correctly selects the incremental set across tasks).
+value per rule correctly selects the incremental set for its task).
 
 A ``PushRun`` records one push execution (succeeded / failed / no_new).
 
 ``SmtpConfig`` is a single-row (``id=1``) table that overrides the ``email``
 section in ``app.json`` when present -- page config takes priority over file.
+
+Note: the legacy ``task_ids`` JSON column (multi-task, N:M) is retained on the
+DB for migration only and is intentionally NOT mapped on the ORM; the
+consolidation migration (``core/database.py``) reads it via raw SQL, splits
+multi-task rules into per-task 1:1 rules, then ignores it thereafter.
 """
 from __future__ import annotations
 
@@ -35,9 +41,11 @@ class PushRule(Base):
     __tablename__ = "push_rules"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    name: Mapped[str] = mapped_column(String(128), nullable=False)
+    name: Mapped[str] = mapped_column(String(128), nullable=False, default="")
     channel: Mapped[str] = mapped_column(String(32), nullable=False, default="email")
-    task_ids: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
+    task_id: Mapped[int | None] = mapped_column(
+        ForeignKey("analysis_tasks.id", ondelete="CASCADE"), nullable=True, index=True
+    )
     event_types: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
     recipients: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
     trigger_mode: Mapped[str] = mapped_column(String(16), nullable=False)  # on_run|scheduled|manual

@@ -9,7 +9,7 @@ def test_push_rule_defaults_and_json(client):
     with SessionLocal() as db:
         rule = PushRule(
             name="r1",
-            task_ids=[1, 2],
+            task_id=None,  # 1:1 模型：task_id 可空（模型默认/JSON 字段测试不依赖具体任务）
             event_types=["per_item", "aggregate"],
             recipients=["a@example.com"],
             trigger_mode="on_run",
@@ -21,7 +21,7 @@ def test_push_rule_defaults_and_json(client):
         assert rule.enabled is True
         assert rule.last_pushed_result_id is None
         assert rule.max_events_per_email == 50
-        assert rule.task_ids == [1, 2]
+        assert rule.task_id is None
         assert rule.event_types == ["per_item", "aggregate"]
         assert rule.recipients == ["a@example.com"]
         assert rule.created_at is not None
@@ -31,7 +31,7 @@ def test_push_run_cascade_on_rule_delete(client):
     with SessionLocal() as db:
         rule = PushRule(
             name="r2",
-            task_ids=[1],
+            task_id=None,
             event_types=["per_item"],
             recipients=["a@x.com"],
             trigger_mode="manual",

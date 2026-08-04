@@ -11,25 +11,6 @@ export interface SmtpConfig {
   password: string // 脱敏展示值
 }
 
-export type TriggerMode = 'on_run' | 'scheduled' | 'manual'
-
-export interface PushRule {
-  id: number
-  name: string
-  channel: string
-  task_ids: number[]
-  event_types: string[]
-  recipients: string[]
-  trigger_mode: TriggerMode
-  cron_expr: string | null
-  interval_seconds: number | null
-  enabled: boolean
-  last_pushed_result_id: number | null
-  max_events_per_email: number
-  created_at: string
-  updated_at: string
-}
-
 export interface PushRun {
   id: number
   rule_id: number
@@ -43,7 +24,7 @@ export interface PushRun {
   created_at: string
 }
 
-// ---- SMTP config ----
+// ---- SMTP config（全局邮件通道，归属「任务分析」页）----
 export const getSmtpApi = () => request.get<unknown, SmtpConfig>('/api/push/smtp')
 
 export const putSmtpApi = (data: {
@@ -59,33 +40,3 @@ export const putSmtpApi = (data: {
 
 export const testSmtpApi = (to_email: string) =>
   request.post<unknown, { ok: boolean; error: string | null }>('/api/push/smtp/test', { to_email })
-
-// ---- Push rules ----
-export interface RuleForm {
-  name: string
-  task_ids: number[]
-  event_types: string[]
-  recipients: string[]
-  trigger_mode: TriggerMode
-  cron_expr: string | null
-  interval_seconds: number | null
-  enabled: boolean
-  max_events_per_email: number
-}
-
-export const listRulesApi = () => request.get<unknown, PushRule[]>('/api/push/rules')
-
-export const createRuleApi = (data: RuleForm) =>
-  request.post<unknown, PushRule>('/api/push/rules', data)
-
-export const updateRuleApi = (id: number, data: Partial<RuleForm>) =>
-  request.put<unknown, PushRule>(`/api/push/rules/${id}`, data)
-
-export const deleteRuleApi = (id: number) =>
-  request.delete<unknown, unknown>(`/api/push/rules/${id}`)
-
-export const triggerRuleApi = (id: number) =>
-  request.post<unknown, { ok: boolean }>(`/api/push/rules/${id}/trigger`)
-
-export const listRunsApi = (ruleId: number) =>
-  request.get<unknown, PushRun[]>(`/api/push/rules/${ruleId}/runs`)

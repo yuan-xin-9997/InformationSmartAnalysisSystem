@@ -1,30 +1,50 @@
-"""Analysis-task endpoints: CRUD, bind sources, trigger analysis, view results."""
+"""Analysis-task endpoints: CRUD, bind sources, trigger analysis, view results.
+
+Consolidated (consolidate-task-analysis-page): each task also owns at most one
+1:1 scheduled-analysis config and one 1:1 push config, managed through the task
+edit dialog. ``PUT /api/analysis-tasks/{id}`` upserts/deletes them in one
+transaction; list/detail responses carry the full ``schedule``/``push`` configs.
+"""
 from __future__ import annotations
 
+from apscheduler.triggers.cron import CronTrigger
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ..core.database import get_db
 from ..core.deps import require_page
+from ..core.timeutil import utcnow
 from ..models.analysis import AnalysisResult, AnalysisTask, TaskSource
 from ..models.info_source import InfoItem, InfoItemFigure, InfoSource
+from ..models.push import PushRule, PushRun
+from ..models.scheduled_job import ScheduledJob
 from ..models.task import TaskRun
 from ..models.user import User
 from ..schemas.analysis import (
     AnalysisResultOut,
     AnalysisTaskCreate,
     AnalysisTaskDetailOut,
-    AnalysisTaskOut,
     AnalysisTaskUpdate,
+    PushConfigBase,
+    PushConfigOut,
     RunAnalysisRequest,
+    ScheduleConfigBase,
+    ScheduleConfigOut,
     TaskSourceOut,
 )
 from ..schemas.info_source import InfoItemFigureOut, SourceFileOut
+from ..schemas.push import PushRunOut
 from ..services import worker
 from ..services.analysis import run_analysis
+from ..services import scheduler as sched_svc
+from ..services.push.push_scheduler import reschedule_push_job, remove_push_job
+from ..services.push.service import run_push
 
 router = APIRouter(prefix="/api/analysis-tasks", tags=["分析任务"])
+
+
+# ---------- sub-config helpers (1:1 schedule / push) ----------
 
 
 def _build_sources(task: AnalysisTask) -> list[TaskSourceOut]:
@@ -45,6 +65,157 @@ def _build_sources(task: AnalysisTask) -> list[TaskSourceOut]:
     return out
 
 
+def _attach_sub_configs(db: Session, task: AnalysisTask, detail: AnalysisTaskDetailOut) -> None:
+    """Populate the task's 1:1 schedule/push configs on the response schema."""
+    sj = db.scalar(select(ScheduledJob).where(ScheduledJob.task_id == task.id))
+    detail.schedule = ScheduleConfigOut.model_validate(sj) if sj else None
+    pr = db.scalar(select(PushRule).where(PushRule.task_id == task.id))
+    detail.push = PushConfigOut.model_validate(pr) if pr else None
+
+
+def _attach_sub_configs_batch(
+    db: Session, tasks: list[AnalysisTask], details: list[AnalysisTaskDetailOut]
+) -> None:
+    if not tasks:
+        return
+    ids = [t.id for t in tasks]
+    sjs = {
+        sj.task_id: sj
+        for sj in db.scalars(select(ScheduledJob).where(ScheduledJob.task_id.in_(ids))).all()
+    }
+    prs = {
+        pr.task_id: pr
+        for pr in db.scalars(select(PushRule).where(PushRule.task_id.in_(ids))).all()
+    }
+    for task, detail in zip(tasks, details):
+        sj = sjs.get(task.id)
+        pr = prs.get(task.id)
+        detail.schedule = ScheduleConfigOut.model_validate(sj) if sj else None
+        detail.push = PushConfigOut.model_validate(pr) if pr else None
+
+
+def _validate_schedule(cfg: ScheduleConfigBase) -> None:
+    if cfg.mode not in ("full", "incremental"):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="定时模式必须是 full 或 incremental")
+    if cfg.trigger_type not in ("cron", "interval"):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="触发类型必须是 cron 或 interval")
+    if cfg.trigger_type == "cron":
+        if not cfg.cron_expr:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="cron 模式必须填写 cron_expr")
+        try:
+            CronTrigger.from_crontab(cfg.cron_expr)
+        except Exception:  # noqa: BLE001
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="cron 表达式不合法")
+    if cfg.trigger_type == "interval" and (not cfg.interval_seconds or cfg.interval_seconds <= 0):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="interval 模式必须填写大于 0 的间隔秒数")
+
+
+def _validate_push(cfg: PushConfigBase) -> None:
+    if cfg.trigger_mode not in ("on_run", "scheduled", "manual"):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="trigger_mode 取值: on_run|scheduled|manual")
+    if not cfg.event_types:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="请选择至少一种事件类型")
+    if not cfg.recipients:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="请填写至少一个收件人邮箱")
+    if cfg.trigger_mode == "scheduled" and not (
+        cfg.cron_expr or (cfg.interval_seconds and cfg.interval_seconds > 0)
+    ):
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST, detail="scheduled 模式必须填写 cron_expr 或大于 0 的 interval_seconds"
+        )
+    if cfg.cron_expr:
+        try:
+            CronTrigger.from_crontab(cfg.cron_expr)
+        except Exception:  # noqa: BLE001
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="cron 表达式不合法")
+
+
+def _upsert_schedule(db: Session, task_id: int, cfg: ScheduleConfigBase, task_name: str) -> ScheduledJob:
+    sj = db.scalar(select(ScheduledJob).where(ScheduledJob.task_id == task_id))
+    if sj is None:
+        sj = ScheduledJob(task_id=task_id, name=f"{task_name}-定时")
+        db.add(sj)
+    sj.mode = cfg.mode
+    sj.trigger_type = cfg.trigger_type
+    sj.cron_expr = cfg.cron_expr if cfg.trigger_type == "cron" else None
+    sj.interval_seconds = cfg.interval_seconds if cfg.trigger_type == "interval" else None
+    sj.enabled = cfg.enabled
+    return sj
+
+
+def _upsert_push(db: Session, task_id: int, cfg: PushConfigBase, task_name: str) -> PushRule:
+    pr = db.scalar(select(PushRule).where(PushRule.task_id == task_id))
+    if pr is None:
+        pr = PushRule(task_id=task_id, name=f"{task_name}-推送", channel="email")
+        db.add(pr)
+    pr.event_types = cfg.event_types
+    pr.recipients = cfg.recipients
+    pr.trigger_mode = cfg.trigger_mode
+    pr.cron_expr = cfg.cron_expr
+    pr.interval_seconds = cfg.interval_seconds
+    pr.enabled = cfg.enabled
+    pr.max_events_per_email = cfg.max_events_per_email
+    return pr
+
+
+def _apply_sub_configs(
+    db: Session, task_id: int, task_name: str, req: AnalysisTaskCreate | AnalysisTaskUpdate
+) -> dict:
+    """Upsert/delete the 1:1 schedule & push configs declared on the request.
+
+    Returns a dict of deferred scheduler-sync actions to run AFTER commit:
+    ``{"schedule": ("delete", job_id) | ("upsert", sj) | None,
+       "push": ("delete", rule_id) | ("upsert", pr) | None}``.
+    """
+    actions: dict[str, tuple | None] = {"schedule": None, "push": None}
+    # Create has no delete semantics; Update distinguishes null=delete via model_fields_set.
+    fields_set = getattr(req, "model_fields_set", set())
+    schedule_provided = "schedule" in fields_set if isinstance(req, AnalysisTaskUpdate) else req.schedule is not None
+    push_provided = "push" in fields_set if isinstance(req, AnalysisTaskUpdate) else req.push is not None
+
+    if schedule_provided:
+        if req.schedule is None:
+            existing = db.scalar(select(ScheduledJob).where(ScheduledJob.task_id == task_id))
+            if existing:
+                actions["schedule"] = ("delete", existing.id)
+                db.delete(existing)
+        else:
+            _validate_schedule(req.schedule)
+            actions["schedule"] = ("upsert", _upsert_schedule(db, task_id, req.schedule, task_name))
+
+    if push_provided:
+        if req.push is None:
+            existing = db.scalar(select(PushRule).where(PushRule.task_id == task_id))
+            if existing:
+                actions["push"] = ("delete", existing.id)
+                db.delete(existing)
+        else:
+            _validate_push(req.push)
+            actions["push"] = ("upsert", _upsert_push(db, task_id, req.push, task_name))
+    return actions
+
+
+def _sync_after_commit(db: Session, actions: dict) -> None:
+    """Run deferred scheduler sync after the DB transaction commits."""
+    sched_act = actions.get("schedule")
+    if sched_act:
+        if sched_act[0] == "delete":
+            sched_svc.remove_scheduled_job(sched_act[1])
+        else:
+            db.refresh(sched_act[1])
+            sched_svc.reschedule_scheduled_job(sched_act[1])
+    push_act = actions.get("push")
+    if push_act:
+        if push_act[0] == "delete":
+            remove_push_job(push_act[1])
+        else:
+            db.refresh(push_act[1])
+            reschedule_push_job(push_act[1])
+
+
+# ---------- task CRUD ----------
+
+
 @router.get("", response_model=list[AnalysisTaskDetailOut])
 def list_tasks(
     _: User = Depends(require_page("analysis_tasks")), db: Session = Depends(get_db)
@@ -55,6 +226,7 @@ def list_tasks(
         detail = AnalysisTaskDetailOut.model_validate(task)
         detail.sources = _build_sources(task)
         out.append(detail)
+    _attach_sub_configs_batch(db, tasks, out)
     return out
 
 
@@ -74,10 +246,14 @@ def create_task(
             )
         task.task_sources.append(TaskSource(source_id=sid))
     db.add(task)
+    db.flush()  # assign task.id for the 1:1 sub-config FKs
+    actions = _apply_sub_configs(db, task.id, task.name, req)
     db.commit()
     db.refresh(task)
+    _sync_after_commit(db, actions)
     detail = AnalysisTaskDetailOut.model_validate(task)
     detail.sources = _build_sources(task)
+    _attach_sub_configs(db, task, detail)
     return detail
 
 
@@ -92,6 +268,7 @@ def get_task(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="分析任务不存在")
     detail = AnalysisTaskDetailOut.model_validate(task)
     detail.sources = _build_sources(task)
+    _attach_sub_configs(db, task, detail)
     return detail
 
 
@@ -119,10 +296,13 @@ def update_task(
                     status_code=status.HTTP_400_BAD_REQUEST, detail=f"信息源不存在: {sid}"
                 )
             task.task_sources.append(TaskSource(source_id=sid))
+    actions = _apply_sub_configs(db, task_id, task.name, req)
     db.commit()
     db.refresh(task)
+    _sync_after_commit(db, actions)
     detail = AnalysisTaskDetailOut.model_validate(task)
     detail.sources = _build_sources(task)
+    _attach_sub_configs(db, task, detail)
     return detail
 
 
@@ -135,6 +315,13 @@ def delete_task(
     task = db.get(AnalysisTask, task_id)
     if task is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="分析任务不存在")
+    # 1:1 sub-configs: stop their scheduler jobs; ORM/DB cascade removes the rows.
+    sj = db.scalar(select(ScheduledJob).where(ScheduledJob.task_id == task_id))
+    if sj:
+        sched_svc.remove_scheduled_job(sj.id)
+    pr = db.scalar(select(PushRule).where(PushRule.task_id == task_id))
+    if pr:
+        remove_push_job(pr.id)
     db.delete(task)
     db.commit()
     return {"detail": "已删除"}
@@ -167,7 +354,6 @@ def run_task(
     task = db.get(AnalysisTask, task_id)
     if task is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="分析任务不存在")
-    # 自定义模式（任务 config.mode=custom 或运行 mode=custom）：运行记录标记为 custom。
     run_mode = "custom" if (req.mode == "custom" or (task.config or {}).get("mode") == "custom") else req.mode
     run = TaskRun(
         kind="analysis",
@@ -181,6 +367,79 @@ def run_task(
     db.refresh(run)
     worker.submit(run_analysis, run.id, task_id, req.mode)
     return {"run_id": run.id, "status": "pending"}
+
+
+# ---------- 1:1 sub-config actions ----------
+
+
+@router.post("/{task_id}/schedule/run")
+def run_schedule_now(
+    task_id: int,
+    _: User = Depends(require_page("analysis_tasks")),
+    db: Session = Depends(get_db),
+):
+    """立即执行该任务的定时分析（按其定时配置的 mode 触发一次运行）。"""
+    task = db.get(AnalysisTask, task_id)
+    if task is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="分析任务不存在")
+    sj = db.scalar(select(ScheduledJob).where(ScheduledJob.task_id == task_id))
+    if sj is None:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="该任务未配置定时分析")
+    run = TaskRun(
+        kind="analysis",
+        ref_id=task.id,
+        ref_name=task.name,
+        mode=sj.mode,
+        status="pending",
+        scheduled_job_id=sj.id,
+    )
+    db.add(run)
+    sj.last_run_at = utcnow()
+    sj.last_run_status = "running"
+    db.commit()
+    db.refresh(run)
+    worker.submit(run_analysis, run.id, task.id, sj.mode)
+    return {"run_id": run.id, "status": "pending"}
+
+
+@router.post("/{task_id}/push/trigger")
+def trigger_push(
+    task_id: int,
+    _: User = Depends(require_page("analysis_tasks")),
+    db: Session = Depends(get_db),
+):
+    """手动触发该任务的推送（按其 1:1 推送配置执行一次增量推送）。"""
+    task = db.get(AnalysisTask, task_id)
+    if task is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="分析任务不存在")
+    pr = db.scalar(select(PushRule).where(PushRule.task_id == task_id))
+    if pr is None:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="该任务未配置推送")
+    worker.submit(run_push, pr.id, "manual")
+    return {"ok": True}
+
+
+@router.get("/{task_id}/push/runs", response_model=list[PushRunOut])
+def list_push_runs(
+    task_id: int,
+    _: User = Depends(require_page("analysis_tasks")),
+    db: Session = Depends(get_db),
+):
+    """按任务查看推送历史（该任务 1:1 推送配置的历次推送记录）。"""
+    task = db.get(AnalysisTask, task_id)
+    if task is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="分析任务不存在")
+    pr = db.scalar(select(PushRule).where(PushRule.task_id == task_id))
+    if pr is None:
+        return []
+    return (
+        db.scalars(
+            select(PushRun).where(PushRun.rule_id == pr.id).order_by(PushRun.id.desc())
+        ).all()
+    )
+
+
+# ---------- results ----------
 
 
 @router.get("/{task_id}/results", response_model=list[AnalysisResultOut])
@@ -201,7 +460,6 @@ def list_task_results(
         q = q.where(AnalysisResult.task_run_id == run_id)
     results = db.scalars(q).all()
 
-    # Batch-prefetch InfoItem + InfoItemFigure to avoid N+1 (one query each).
     item_ids = {r.info_item_id for r in results if r.info_item_id}
     items_map: dict[int, InfoItem] = {}
     figs_by_item: dict[int, list[InfoItemFigure]] = {}

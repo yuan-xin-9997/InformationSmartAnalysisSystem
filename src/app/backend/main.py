@@ -18,7 +18,6 @@ from .api import auth as auth_api
 from .api import config_view as config_api
 from .api import info_sources as info_sources_api
 from .api import push as push_api
-from .api import scheduled_jobs as scheduled_jobs_api
 from .api import task_center as task_center_api
 from .api import users as users_api
 from .core.config import PROJECT_ROOT, settings
@@ -71,7 +70,6 @@ app.include_router(config_api.router)
 app.include_router(task_center_api.router)
 app.include_router(info_sources_api.router)
 app.include_router(analysis_tasks_api.router)
-app.include_router(scheduled_jobs_api.router)
 app.include_router(push_api.router)
 
 

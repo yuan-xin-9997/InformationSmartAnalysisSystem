@@ -1,4 +1,11 @@
-"""Scheduled-job model: a cron/interval schedule that auto-triggers an analysis task."""
+"""Scheduled-job model: a cron/interval schedule that auto-triggers an analysis task.
+
+Consolidated to 1:1 with ``AnalysisTask`` (one schedule per task): enforced by a
+unique index ``uq_scheduled_jobs_task_id`` (created by the consolidation
+migration) plus service-layer upsert-by-``task_id``. The column itself carries
+no DB-level unique constraint in the ORM so lightweight migrations can add the
+index without recreating the table.
+"""
 from __future__ import annotations
 
 from datetime import datetime

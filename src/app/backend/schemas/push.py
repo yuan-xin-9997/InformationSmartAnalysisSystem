@@ -32,54 +32,6 @@ class TestEmailRequest(BaseModel):
     to_email: str
 
 
-# ---- Push rules ----
-
-_TRIGGER_MODES = ("on_run", "scheduled", "manual")
-
-
-class PushRuleCreate(BaseModel):
-    name: str
-    channel: str = "email"
-    task_ids: list[int] = []
-    event_types: list[str] = []
-    recipients: list[str] = []
-    trigger_mode: str  # on_run | scheduled | manual
-    cron_expr: str | None = None
-    interval_seconds: int | None = None
-    enabled: bool = True
-    max_events_per_email: int = 50
-
-
-class PushRuleUpdate(BaseModel):
-    name: str | None = None
-    channel: str | None = None
-    task_ids: list[int] | None = None
-    event_types: list[str] | None = None
-    recipients: list[str] | None = None
-    trigger_mode: str | None = None
-    cron_expr: str | None = None
-    interval_seconds: int | None = None
-    enabled: bool | None = None
-    max_events_per_email: int | None = None
-
-
-class PushRuleOut(ORMBase):
-    id: int
-    name: str
-    channel: str
-    task_ids: list[int]
-    event_types: list[str]
-    recipients: list[str]
-    trigger_mode: str
-    cron_expr: str | None
-    interval_seconds: int | None
-    enabled: bool
-    last_pushed_result_id: int | None
-    max_events_per_email: int
-    created_at: BeijingDatetime
-    updated_at: BeijingDatetime
-
-
 class PushRunOut(ORMBase):
     id: int
     rule_id: int

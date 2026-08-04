@@ -66,7 +66,7 @@ def test_incremental_push_only_new(client, monkeypatch):
         tid, rids = _make_task(db, "T", [("per_item", "c1"), ("per_item", "c2"), ("per_item", "c3")])
         rule = PushRule(
             name="r",
-            task_ids=[tid],
+            task_id=tid,
             event_types=["per_item"],
             recipients=["a@x.com"],
             trigger_mode="manual",
@@ -94,7 +94,7 @@ def test_first_push_sends_all_matching(client, monkeypatch):
         tid, rids = _make_task(db, "T", [("per_item", "c1"), ("per_item", "c2")])
         rule = PushRule(
             name="r",
-            task_ids=[tid],
+            task_id=tid,
             event_types=["per_item"],
             recipients=["a@x.com"],
             trigger_mode="manual",
@@ -122,7 +122,7 @@ def test_filter_by_task_and_event_type(client, monkeypatch):
         tid_b, _ = _make_task(db, "B", [("per_item", "b1")])
         rule = PushRule(
             name="r",
-            task_ids=[tid_a],  # 只选任务A
+            task_id=tid_a,  # 只选任务A
             event_types=["per_item"],  # 只选 per_item
             recipients=["a@x.com"],
             trigger_mode="manual",
@@ -147,7 +147,7 @@ def test_batching_sends_multiple_emails(client, monkeypatch):
         tid, rids = _make_task(db, "T", [("per_item", f"c{i}") for i in range(5)])
         rule = PushRule(
             name="r",
-            task_ids=[tid],
+            task_id=tid,
             event_types=["per_item"],
             recipients=["a@x.com"],
             trigger_mode="manual",
@@ -175,7 +175,7 @@ def test_failure_does_not_advance_watermark(client, monkeypatch):
         tid, rids = _make_task(db, "T", [("per_item", f"c{i}") for i in range(5)])
         rule = PushRule(
             name="r",
-            task_ids=[tid],
+            task_id=tid,
             event_types=["per_item"],
             recipients=["a@x.com"],
             trigger_mode="manual",
@@ -203,7 +203,7 @@ def test_no_new_events_records_no_new(client, monkeypatch):
         tid, rids = _make_task(db, "T", [("per_item", "c1")])
         rule = PushRule(
             name="r",
-            task_ids=[tid],
+            task_id=tid,
             event_types=["per_item"],
             recipients=["a@x.com"],
             trigger_mode="manual",
@@ -227,16 +227,17 @@ def test_on_analysis_completed_triggers_matching_rules(client, sync_worker, monk
     with SessionLocal() as db:
         _setup_smtp(db)
         tid, rids = _make_task(db, "T", [("per_item", "c1")])
+        tid_other, _ = _make_task(db, "OTHER", [("per_item", "o1")])  # 另一个任务
         rule = PushRule(
             name="r",
-            task_ids=[tid],
+            task_id=tid,
             event_types=["per_item"],
             recipients=["a@x.com"],
             trigger_mode="on_run",
         )
         other = PushRule(
             name="other",
-            task_ids=[tid + 999],  # 不匹配该任务
+            task_id=tid_other,  # 归属另一个任务，不匹配 tid
             event_types=["per_item"],
             recipients=["b@x.com"],
             trigger_mode="on_run",
@@ -245,6 +246,7 @@ def test_on_analysis_completed_triggers_matching_rules(client, sync_worker, monk
         db.commit()
         db.refresh(rule)
         rid = rule.id
+        other_rid = other.id
     fake = _FakeChannel()
     _patch_channel(monkeypatch, fake)
     push_service.on_analysis_completed(tid)
@@ -252,6 +254,8 @@ def test_on_analysis_completed_triggers_matching_rules(client, sync_worker, monk
         run = db.query(PushRun).filter(PushRun.rule_id == rid).one()
         assert run.status == "succeeded"
         assert run.event_count == 1
+        # 归属另一个任务的 on_run 规则不被触发
+        assert db.query(PushRun).filter(PushRun.rule_id == other_rid).count() == 0
 
 
 def test_on_analysis_completed_disabled_rule_not_triggered(client, sync_worker, monkeypatch):
@@ -260,7 +264,7 @@ def test_on_analysis_completed_disabled_rule_not_triggered(client, sync_worker, 
         tid, _ = _make_task(db, "T", [("per_item", "c1")])
         rule = PushRule(
             name="r",
-            task_ids=[tid],
+            task_id=tid,
             event_types=["per_item"],
             recipients=["a@x.com"],
             trigger_mode="on_run",

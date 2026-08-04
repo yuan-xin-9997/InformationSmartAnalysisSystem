@@ -97,7 +97,14 @@ def test_full_flow(client, admin_headers, sync_worker, mock_llm):
     assert client.get("/api/info-sources").status_code == 401
 
 
-def test_scheduled_job_flow_and_results_page_api(client, admin_headers, sync_worker, mock_llm):
+def test_scheduled_job_flow_and_results_page_api(client, admin_headers, sync_worker, mock_llm, monkeypatch):
+    # 三页合一后：定时分析配置并入任务编辑。避免后台调度真实触发。
+    from app.backend.services import scheduler as sched_svc
+
+    monkeypatch.setattr(sched_svc, "add_scheduled_job", lambda sj: None)
+    monkeypatch.setattr(sched_svc, "reschedule_scheduled_job", lambda sj: None)
+    monkeypatch.setattr(sched_svc, "remove_scheduled_job", lambda jid: None)
+
     # 建源 + 任务
     src = client.post(
         "/api/info-sources",
@@ -112,16 +119,17 @@ def test_scheduled_job_flow_and_results_page_api(client, admin_headers, sync_wor
     )
     tid = t.json()["id"]
 
-    # 建定时任务(间隔)并立即执行
-    sj = client.post(
-        "/api/scheduled-jobs",
-        json={"task_id": tid, "name": "每分钟", "mode": "incremental", "trigger_type": "interval", "interval_seconds": 60},
+    # 通过任务编辑配置定时分析（间隔），并立即执行
+    sj = client.put(
+        f"/api/analysis-tasks/{tid}",
+        json={"schedule": {"enabled": True, "mode": "incremental",
+                           "trigger_type": "interval", "interval_seconds": 60}},
         headers=admin_headers,
     )
-    assert sj.status_code == 201
-    jid = sj.json()["id"]
+    assert sj.status_code == 200
+    assert sj.json()["schedule"] is not None
 
-    run = client.post(f"/api/scheduled-jobs/{jid}/run", headers=admin_headers)
+    run = client.post(f"/api/analysis-tasks/{tid}/schedule/run", headers=admin_headers)
     assert run.status_code == 200
     rid = run.json()["run_id"]
 
@@ -138,13 +146,14 @@ def test_scheduled_job_flow_and_results_page_api(client, admin_headers, sync_wor
     assert gone.status_code == 404
     assert client.post("/api/analysis-results", headers=admin_headers).status_code == 404
 
-    # 清理: 禁用并删除定时任务
-    assert client.post(f"/api/scheduled-jobs/{jid}/toggle", headers=admin_headers).status_code == 200
-    assert client.delete(f"/api/scheduled-jobs/{jid}", headers=admin_headers).status_code == 200
+    # 清理: 删除定时配置（schedule:null）
+    clr = client.put(f"/api/analysis-tasks/{tid}", json={"schedule": None}, headers=admin_headers)
+    assert clr.status_code == 200
+    assert clr.json()["schedule"] is None
 
 
 def test_push_flow(client, admin_headers, sync_worker, mock_llm, monkeypatch):
-    """端到端推送冒烟：配 SMTP -> 建规则 -> 手动触发 -> 历史记录正确（mock 邮件发送）。"""
+    """端到端推送冒烟：配 SMTP -> 任务编辑配推送 -> 手动触发 -> 历史记录正确（mock 邮件发送）。"""
     # mock 邮件发送，避免真实 SMTP
     from app.backend.services.push.channels import email_channel
 
@@ -180,27 +189,23 @@ def test_push_flow(client, admin_headers, sync_worker, mock_llm, monkeypatch):
     )
     assert r.status_code == 200
 
-    # 建推送规则（手动触发，选该任务 + per_item）
-    rule = client.post(
-        "/api/push/rules",
+    # 通过任务编辑配置推送（手动触发，选 per_item）
+    up = client.put(
+        f"/api/analysis-tasks/{tid}",
         headers=admin_headers,
-        json={
-            "name": "推送1",
-            "task_ids": [tid],
-            "event_types": ["per_item"],
-            "recipients": ["to@x.com"],
-            "trigger_mode": "manual",
-        },
-    ).json()
-    rid = rule["id"]
+        json={"push": {"enabled": True, "event_types": ["per_item"],
+                       "recipients": ["to@x.com"], "trigger_mode": "manual"}},
+    )
+    assert up.status_code == 200
+    assert up.json()["push"] is not None
 
     # 手动触发 -> 同步执行推送
-    trig = client.post(f"/api/push/rules/{rid}/trigger", headers=admin_headers)
+    trig = client.post(f"/api/analysis-tasks/{tid}/push/trigger", headers=admin_headers)
     assert trig.status_code == 200
     assert trig.json()["ok"] is True
 
     # 历史应为成功、事件数=1、收件人正确
-    runs = client.get(f"/api/push/rules/{rid}/runs", headers=admin_headers).json()
+    runs = client.get(f"/api/analysis-tasks/{tid}/push/runs", headers=admin_headers).json()
     assert len(runs) == 1
     assert runs[0]["status"] == "succeeded"
     assert runs[0]["event_count"] == 1

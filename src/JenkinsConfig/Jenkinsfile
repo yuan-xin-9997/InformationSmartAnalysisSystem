@@ -64,7 +64,14 @@ pipeline {
 
         stage('停止当前服务') {
             steps {
-                sh 'if [ -x "$DEPLOY_DIR/stop.sh" ]; then "$DEPLOY_DIR/stop.sh"; fi'
+                sh '''
+                    if [ -x "$DEPLOY_DIR/stop.sh" ]; then "$DEPLOY_DIR/stop.sh"; fi
+                    # 三页合一迁移不可逆（会拆分多任务推送规则、收敛定时、迁移权限），部署前备份 SQLite
+                    if [ -f "$DEPLOY_DIR/data/app.sqlite3" ]; then
+                      cp "$DEPLOY_DIR/data/app.sqlite3" "$DEPLOY_DIR/data/app.sqlite3.bak.$(date +%Y%m%d%H%M%S)"
+                      echo "已备份 app.sqlite3（迁移不可逆，回滚需从此备份恢复）"
+                    fi
+                '''
             }
         }
 
