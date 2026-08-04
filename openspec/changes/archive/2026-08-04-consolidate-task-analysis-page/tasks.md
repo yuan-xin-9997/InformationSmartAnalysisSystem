@@ -54,4 +54,4 @@
 - [x] 8.1 更新 `README.md`：页面介绍改为三页合一「任务分析」、编辑弹窗三分区、SMTP 全局折叠区、权限与路由变化、迁移与备份说明。
 - [x] 8.2 更新需求规格说明书、设计说明书（统一页、1:1 模型、迁移、权限收敛）。
 - [x] 8.3 评估 `Jenkinsfile`/`start.sh`：部署前备份 `data/app.sqlite3`（迁移不可逆）；无依赖/启动方式变化则不改启动逻辑。
-- [ ] 8.4 提交 Github，手动触发 Jenkins 构建，访问服务验证三页合一功能；通过后归档 openspec 变更（`/opsx:archive`）。
+- [x] 8.4 提交 Github，手动触发 Jenkins 构建，访问服务验证三页合一功能；通过后归档 openspec 变更（`/opsx:archive`）。
