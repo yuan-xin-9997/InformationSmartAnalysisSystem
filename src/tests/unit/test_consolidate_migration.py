@@ -39,51 +39,51 @@ def _build_legacy_engine():
                 "recipients TEXT NOT NULL, trigger_mode VARCHAR(16) NOT NULL, "
                 "cron_expr VARCHAR(128), interval_seconds INTEGER, "
                 "enabled BOOLEAN NOT NULL DEFAULT 1, last_pushed_result_id INTEGER, "
-                "max_events_per_email INTEGER NOT NULL DEFAULT 50)"
+                "max_events_per_email INTEGER NOT NULL DEFAULT 50, created_at DATETIME NOT NULL, updated_at DATETIME NOT NULL)"
             )
         )
         # Rule 1: multi-task [1, 2], watermark 100.
         conn.execute(
             text(
                 "INSERT INTO push_rules (id, name, task_ids, event_types, recipients, "
-                "trigger_mode, enabled, last_pushed_result_id, max_events_per_email) "
+                "trigger_mode, enabled, last_pushed_result_id, max_events_per_email, created_at, updated_at) "
                 "VALUES (1, '多任务', '[1,2]', '[\"per_item\"]', '[\"a@x.com\"]', "
-                "'on_run', 1, 100, 50)"
+                "'on_run', 1, 100, 50, '2026-01-01 00:00:00', '2026-01-01 00:00:00')"
             )
         )
         # Rule 2: single-task [3], no watermark yet.
         conn.execute(
             text(
                 "INSERT INTO push_rules (id, name, task_ids, event_types, recipients, "
-                "trigger_mode, enabled, last_pushed_result_id, max_events_per_email) "
+                "trigger_mode, enabled, last_pushed_result_id, max_events_per_email, created_at, updated_at) "
                 "VALUES (2, '单任务', '[3]', '[\"aggregate\"]', '[\"b@x.com\"]', "
-                "'scheduled', 1, NULL, 50)"
+                "'scheduled', 1, NULL, 50, '2026-01-01 00:00:00', '2026-01-01 00:00:00')"
             )
         )
         # Rule 3: empty task_ids [] -- orphan to be deleted.
         conn.execute(
             text(
                 "INSERT INTO push_rules (id, name, task_ids, event_types, recipients, "
-                "trigger_mode, enabled, last_pushed_result_id, max_events_per_email) "
+                "trigger_mode, enabled, last_pushed_result_id, max_events_per_email, created_at, updated_at) "
                 "VALUES (3, '空任务', '[]', '[\"per_item\"]', '[\"c@x.com\"]', "
-                "'manual', 1, NULL, 50)"
+                "'manual', 1, NULL, 50, '2026-01-01 00:00:00', '2026-01-01 00:00:00')"
             )
         )
         # Rule 4 & 5: two legacy rules BOTH covering task 7 -- collapse to one.
         conn.execute(
             text(
                 "INSERT INTO push_rules (id, name, task_ids, event_types, recipients, "
-                "trigger_mode, enabled, last_pushed_result_id, max_events_per_email) "
+                "trigger_mode, enabled, last_pushed_result_id, max_events_per_email, created_at, updated_at) "
                 "VALUES (4, '重复A', '[7]', '[\"per_item\"]', '[\"d@x.com\"]', "
-                "'on_run', 1, 50, 50)"
+                "'on_run', 1, 50, 50, '2026-01-01 00:00:00', '2026-01-01 00:00:00')"
             )
         )
         conn.execute(
             text(
                 "INSERT INTO push_rules (id, name, task_ids, event_types, recipients, "
-                "trigger_mode, enabled, last_pushed_result_id, max_events_per_email) "
+                "trigger_mode, enabled, last_pushed_result_id, max_events_per_email, created_at, updated_at) "
                 "VALUES (5, '重复B', '[7]', '[\"per_item\"]', '[\"e@x.com\"]', "
-                "'on_run', 1, 80, 50)"
+                "'on_run', 1, 80, 50, '2026-01-01 00:00:00', '2026-01-01 00:00:00')"
             )
         )
 

@@ -125,10 +125,10 @@ def _migrate_consolidate_task_analysis(engine_) -> None:
                 text(
                     "INSERT INTO push_rules (name, channel, task_id, task_ids, event_types, "
                     "recipients, trigger_mode, cron_expr, interval_seconds, enabled, "
-                    "last_pushed_result_id, max_events_per_email) "
+                    "last_pushed_result_id, max_events_per_email, created_at, updated_at) "
                     "SELECT r.name, r.channel, CAST(je.value AS INTEGER), '[]', r.event_types, "
                     "r.recipients, r.trigger_mode, r.cron_expr, r.interval_seconds, r.enabled, "
-                    "r.last_pushed_result_id, r.max_events_per_email "
+                    "r.last_pushed_result_id, r.max_events_per_email, r.created_at, r.updated_at "
                     "FROM push_rules r, json_each(r.task_ids) je "
                     "WHERE r.task_id IS NULL "
                     "AND NOT EXISTS (SELECT 1 FROM push_rules p2 "
