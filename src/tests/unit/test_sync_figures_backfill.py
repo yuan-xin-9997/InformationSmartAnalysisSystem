@@ -593,25 +593,25 @@ def test_sync_new_item_persists_extraction_method(db_session, tmp_path):
 
 
 def test_backfill_retries_none_item_with_vision(monkeypatch, db_session, tmp_path):
-    """A 'none' item is re-extracted via vision when fallback is enabled:
-    content updates, method becomes 'vision_llm', analyzed resets."""
-    import app.backend.services.analysis.llm_client as llm_mod
+    """A 'none' item is re-extracted via OCR when fallback is enabled:
+    content updates, method becomes 'ocr_service', analyzed resets."""
+    import app.backend.services.clients.ocr_client as ocr_mod
     import app.backend.services.info_source.local_folder as lf
     from app.backend.models.info_source import InfoItem, InfoSource
     from app.backend.services.info_source.sync import run_sync
 
     monkeypatch.setattr(lf.settings, "extraction_vision_fallback", True)
 
-    class _MockLLM:
+    class _MockOCR:
         def __init__(self, *a, **kw):
             pass
 
-        def chat_with_images(self, system, user_text, images, mime="image/png"):
-            return "视觉提取的正文内容"
+        def ocr(self, image_bytes, filename=None, mode=None, language=None):
+            return "OCR 提取的正文内容"
 
-    monkeypatch.setattr(llm_mod, "LLMClient", _MockLLM)
+    monkeypatch.setattr(ocr_mod, "OCRClient", _MockOCR)
 
-    # Short text -> poor text layer -> triggers vision fallback.
+    # Short text -> poor text layer -> triggers OCR fallback.
     pdf = tmp_path / "scan.pdf"
     _make_pdf(pdf, title="T", author="A", text_lines=["短"])
     source_id = _make_source(db_session, tmp_path)
@@ -644,8 +644,8 @@ def test_backfill_retries_none_item_with_vision(monkeypatch, db_session, tmp_pat
 
     with _new_session() as db:
         refreshed = db.get(InfoItem, item_id)
-        assert refreshed.extraction_method == "vision_llm"
-        assert refreshed.content == "视觉提取的正文内容"
+        assert refreshed.extraction_method == "ocr_service"
+        assert refreshed.content == "OCR 提取的正文内容"
         assert refreshed.analyzed is False  # content changed -> reset
 
 

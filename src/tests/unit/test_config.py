@@ -205,3 +205,102 @@ def test_extraction_config_file_override(monkeypatch, tmp_path):
     assert s.extraction_vision_fallback is False
     assert s.extraction_max_ocr_pages == 3
     assert s.extraction_render_dpi == 120
+
+
+# ---------- OCR / 翻译服务配置 ----------
+
+
+def test_ocr_settings_defaults(monkeypatch, tmp_path):
+    """ocr 节代码默认值（app.json 无 ocr 块时）：超时 120s、mode text、language auto。"""
+    import json
+
+    from app.backend.core.config import Settings
+
+    cfg = tmp_path / "app.json"
+    cfg.write_text(json.dumps({}), encoding="utf-8")
+    monkeypatch.setenv("ISAS_CONFIG", str(cfg))
+    for var in (
+        "ISAS_OCR_BASE_URL",
+        "ISAS_OCR_API_KEY",
+        "ISAS_OCR_TIMEOUT",
+        "ISAS_OCR_MODE",
+        "ISAS_OCR_LANGUAGE",
+    ):
+        monkeypatch.delenv(var, raising=False)
+    s = Settings()
+    assert s.ocr_base_url == ""
+    assert s.ocr_api_key == ""
+    assert s.ocr_timeout_seconds == 120
+    assert s.ocr_mode == "text"
+    assert s.ocr_language == "auto"
+
+
+def test_ocr_env_override(monkeypatch):
+    """ISAS_OCR_* 环境变量覆盖默认值。"""
+    from app.backend.core.config import Settings
+
+    monkeypatch.setenv("ISAS_OCR_BASE_URL", "https://ocr.example.com")
+    monkeypatch.setenv("ISAS_OCR_API_KEY", "key-ocr")
+    monkeypatch.setenv("ISAS_OCR_TIMEOUT", "180")
+    monkeypatch.setenv("ISAS_OCR_MODE", "markdown")
+    monkeypatch.setenv("ISAS_OCR_LANGUAGE", "zh-Hans")
+    s = Settings()
+    assert s.ocr_base_url == "https://ocr.example.com"
+    assert s.ocr_api_key == "key-ocr"
+    assert s.ocr_timeout_seconds == 180
+    assert s.ocr_mode == "markdown"
+    assert s.ocr_language == "zh-Hans"
+
+
+def test_translate_settings_defaults(monkeypatch, tmp_path):
+    """translate 节代码默认值（app.json 无 translate 块时）：超时 60s、target zh-Hans、mode quality。"""
+    import json
+
+    from app.backend.core.config import Settings
+
+    cfg = tmp_path / "app.json"
+    cfg.write_text(json.dumps({}), encoding="utf-8")
+    monkeypatch.setenv("ISAS_CONFIG", str(cfg))
+    for var in (
+        "ISAS_TRANSLATE_BASE_URL",
+        "ISAS_TRANSLATE_API_KEY",
+        "ISAS_TRANSLATE_TIMEOUT",
+        "ISAS_TRANSLATE_DEFAULT_TARGET",
+        "ISAS_TRANSLATE_DEFAULT_MODE",
+    ):
+        monkeypatch.delenv(var, raising=False)
+    s = Settings()
+    assert s.translate_base_url == ""
+    assert s.translate_api_key == ""
+    assert s.translate_timeout_seconds == 60
+    assert s.translate_default_target == "zh-Hans"
+    assert s.translate_default_mode == "quality"
+
+
+def test_translate_env_override(monkeypatch):
+    """ISAS_TRANSLATE_* 环境变量覆盖默认值。"""
+    from app.backend.core.config import Settings
+
+    monkeypatch.setenv("ISAS_TRANSLATE_BASE_URL", "https://translate.example.com")
+    monkeypatch.setenv("ISAS_TRANSLATE_API_KEY", "key-tr")
+    monkeypatch.setenv("ISAS_TRANSLATE_TIMEOUT", "90")
+    monkeypatch.setenv("ISAS_TRANSLATE_DEFAULT_TARGET", "en")
+    monkeypatch.setenv("ISAS_TRANSLATE_DEFAULT_MODE", "fast")
+    s = Settings()
+    assert s.translate_base_url == "https://translate.example.com"
+    assert s.translate_api_key == "key-tr"
+    assert s.translate_timeout_seconds == 90
+    assert s.translate_default_target == "en"
+    assert s.translate_default_mode == "fast"
+
+
+def test_extraction_vision_model_still_readable_but_deprecated(monkeypatch):
+    """extraction_vision_model 已废弃但仍可读取（向后兼容），不影响新逻辑。"""
+    from app.backend.core.config import Settings
+
+    monkeypatch.setenv("ISAS_EXTRACTION_VISION_MODEL", "gpt-4o")
+    s = Settings()
+    # 仍可读取（向后兼容旧 app.json / env）
+    assert s.extraction_vision_model == "gpt-4o"
+    # 但新兜底逻辑不再使用它：OCR 配置独立存在
+    assert hasattr(s, "ocr_base_url")

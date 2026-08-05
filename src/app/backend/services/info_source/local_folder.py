@@ -6,9 +6,10 @@ page_count) and embedded figures from local files (txt/md/html/pdf/docx).
 (it has ``settings.figures_dir`` and the ``item_id``).
 
 For PDFs whose text layer is empty or garbled (scanned / broken-font encoding),
-a vision-LLM fallback renders pages to images and extracts text via a
-multimodal LLM. The quality of the text-layer output is judged by a readable
-character ratio; only when it falls below threshold is the fallback engaged.
+an OCR fallback renders pages to images and extracts text via the NAS local OCR
+service (CLAUDE.md 架构要求 5). The quality of the text-layer output is judged
+by a readable character ratio; only when it falls below threshold is the
+fallback engaged.
 """
 from __future__ import annotations
 
@@ -110,13 +111,13 @@ def _extract_pdf(path: Path) -> str:
     return "\n".join(parts).strip()
 
 
-def _extract_pdf_content(path: Path, llm_client=None) -> tuple[str | None, str]:
+def _extract_pdf_content(path: Path, ocr_client=None) -> tuple[str | None, str]:
     """Extract PDF body text + ``extraction_method``.
 
     Tries the text layer first; if its quality is poor (empty/garbled) and the
-    vision fallback is enabled, renders pages to images and uses a multimodal
-    LLM to extract text. Returns ``(content, method)`` where method is
-    ``text_layer`` | ``vision_llm`` | ``none``. ``content`` is ``None`` only
+    OCR fallback is enabled, renders pages to images and calls the local OCR
+    service to extract text. Returns ``(content, method)`` where method is
+    ``text_layer`` | ``ocr_service`` | ``none``. ``content`` is ``None`` only
     when the text layer itself cannot be read (corrupt file) so the caller
     skips the item; an empty-but-readable text layer yields ``('', ...)``.
     """
@@ -134,18 +135,18 @@ def _extract_pdf_content(path: Path, llm_client=None) -> tuple[str | None, str]:
         return text_layer, "text_layer"
 
     if not settings.extraction_vision_fallback:
-        _logger.info("PDF 文本层质量不佳且视觉兜底未启用，保留原文本: %s", path)
+        _logger.info("PDF 文本层质量不佳且 OCR 兜底未启用，保留原文本: %s", path)
         return text_layer, "none"
 
-    vision_text = _vision_extract_pdf(path, llm_client)
-    if vision_text:
-        return vision_text, "vision_llm"
-    _logger.warning("视觉兜底未产出文本，保留原文本层: %s", path)
+    ocr_text = _vision_extract_pdf(path, ocr_client)
+    if ocr_text:
+        return ocr_text, "ocr_service"
+    _logger.warning("OCR 兜底未产出文本，保留原文本层: %s", path)
     return text_layer, "none"
 
 
-def _vision_extract_pdf(path: Path, llm_client=None) -> str:
-    """Render PDF pages to images and extract text via a multimodal LLM.
+def _vision_extract_pdf(path: Path, ocr_client=None) -> str:
+    """Render PDF pages to images and extract text via the local OCR service.
 
     Returns concatenated page text (may be partial), or ``""`` on failure.
     Never raises -- graceful degradation. Respects ``max_ocr_pages`` and
@@ -153,23 +154,18 @@ def _vision_extract_pdf(path: Path, llm_client=None) -> str:
     """
     import fitz  # noqa: F401  (PyMuPDF; used for rendering below)
 
-    from ..analysis.llm_client import LLMClient, LLMError
+    from ..clients.ocr_client import OCRClient, OCRError
 
     max_pages = settings.extraction_max_ocr_pages
     dpi = settings.extraction_render_dpi
-    vision_model = settings.extraction_vision_model or None
 
-    if llm_client is None:
+    if ocr_client is None:
         try:
-            llm_client = LLMClient(model=vision_model)
-        except LLMError as exc:
-            _logger.warning("视觉兜底 LLM 未就绪，跳过: %s", exc)
+            ocr_client = OCRClient()
+        except OCRError as exc:
+            _logger.warning("OCR 兜底服务未就绪，跳过: %s", exc)
             return ""
 
-    system = (
-        "你是一个文档文本提取助手。请提取并原样输出图片中文档的全部正文文本，"
-        "保留段落与换行结构，仅输出文本本身，不要解说、不要补充。"
-    )
     parts: list[str] = []
     try:
         with fitz.open(path) as doc:
@@ -177,7 +173,7 @@ def _vision_extract_pdf(path: Path, llm_client=None) -> str:
             pages_to_render = min(total, max_pages)
             if total > max_pages:
                 _logger.warning(
-                    "PDF 共 %d 页，视觉兜底仅处理前 %d 页（max_ocr_pages）: %s",
+                    "PDF 共 %d 页，OCR 兜底仅处理前 %d 页（max_ocr_pages）: %s",
                     total,
                     max_pages,
                     path,
@@ -185,22 +181,19 @@ def _vision_extract_pdf(path: Path, llm_client=None) -> str:
             for i in range(pages_to_render):
                 pix = doc[i].get_pixmap(dpi=dpi)
                 img_bytes = pix.tobytes("png")
-                user = (
-                    f"请提取这张文档图片（第 {i + 1} 页，共 {total} 页）的全部正文文本。"
-                )
                 try:
-                    page_text = llm_client.chat_with_images(
-                        system, user, [img_bytes]
+                    page_text = ocr_client.ocr(
+                        img_bytes, filename=f"page_{i + 1}.png"
                     )
                 except Exception as exc:  # noqa: BLE001 (per-page degrade)
                     _logger.warning(
-                        "视觉兜底第 %d 页提取失败，跳过该页: %s", i + 1, exc
+                        "OCR 兜底第 %d 页提取失败，跳过该页: %s", i + 1, exc
                     )
                     continue
                 if page_text and page_text.strip():
                     parts.append(page_text.strip())
     except Exception as exc:  # noqa: BLE001 (render-level degrade)
-        _logger.warning("视觉兜底渲染失败: %s (%s)", path, exc)
+        _logger.warning("OCR 兜底渲染失败: %s (%s)", path, exc)
         return ""
     return "\n".join(parts).strip()
 
@@ -521,30 +514,30 @@ def _jpeg_size(data: bytes) -> tuple[int, int] | None:
 # ---------- full extraction (text + metadata + figures) ----------
 
 
-def _extract_content(path: Path, llm_client=None) -> tuple[str | None, str]:
+def _extract_content(path: Path, ocr_client=None) -> tuple[str | None, str]:
     """Return ``(content, extraction_method)`` for any supported file.
 
     ``content`` is ``None`` only when text extraction fails (corrupt /
     unsupported) -- the caller then skips the item. ``extraction_method`` is
-    ``text_layer`` | ``vision_llm`` | ``none``.
+    ``text_layer`` | ``ocr_service`` | ``none``.
     """
     suffix = path.suffix.lower()
     if suffix == ".pdf":
-        return _extract_pdf_content(path, llm_client)
+        return _extract_pdf_content(path, ocr_client)
     text = extract_text(path)
     if text is None:
         return None, "none"
     return text, "text_layer"
 
 
-def _extract_full(path: Path, llm_client=None) -> InfoItemData | None:
+def _extract_full(path: Path, ocr_client=None) -> InfoItemData | None:
     """Extract text + metadata + figures, packed into ``InfoItemData.extra``.
 
     Returns ``None`` if text extraction fails. Title falls back to the filename
     when metadata has no title. ``extraction_method`` records how the body text
-    was obtained (text_layer / vision_llm / none).
+    was obtained (text_layer / ocr_service / none).
     """
-    content, extraction_method = _extract_content(path, llm_client)
+    content, extraction_method = _extract_content(path, ocr_client)
     if content is None:
         return None
     metadata = extract_metadata(path)

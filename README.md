@@ -69,31 +69,48 @@
 
 `per_item` 事件邮件还会附带附件：文章原文件（`local_folder` 源，PDF/docx/txt/md/html）与内嵌图表图片。附件读取复用文件服务的路径校验防穿越；单文件超 10MB 或不存在时跳过该附件并记日志，不中断推送。`aggregate` 事件无附件。
 
-## PDF 正文抽取（视觉兜底）
+## PDF 正文抽取（OCR 兜底）
 
 `local_folder` 源的 PDF 正文抽取优先读取**文本层**（PyMuPDF `page.get_text()`）。对**扫描件/图片型 PDF**（无文本层）或**字体编码损坏的 PDF**（缺 `ToUnicode CMap`），文本层会返回空串或乱码，导致 LLM 收到"无意义编码字符串"无法分析。
 
-为此系统新增**视觉 LLM 兜底**：当文本层质量不达标（为空、过短、或可读字符占比低于阈值）时，把 PDF 页面渲染成图片，逐页调用多模态 LLM 提取正文文本，作为 `InfoItem.content` 落库。抽取流程保持"先抽取、后分析"，分析侧无感知。
+为此系统启用 **OCR 兜底**：当文本层质量不达标（为空、过短、或可读字符占比低于阈值）时，把 PDF 页面渲染成图片，逐页调用 NAS 本地 OCR 服务（基于 ollama / `glm-ocr`，CLAUDE.md 架构要求 5）提取正文文本，作为 `InfoItem.content` 落库。抽取流程保持"先抽取、后分析"，分析侧无感知。
 
-- **抽取来源**记录在 `InfoItem.extraction_method`：`text_layer`（文本层可用）/ `vision_llm`（视觉兜底成功）/ `none`（均未产出有效文本），并在分析结果接口只读返回，便于追溯。
-- **优雅降级**：视觉兜底未启用、LLM 未配置、或模型不支持视觉/调用失败时，记录警告并保留原文本层内容，不中断同步或分析。
-- **历史回补**：`extraction_method='none'` 或 `content` 为空的历史条目，会在同步 backfill 与手动重抽（`POST /api/info-sources/{source_id}/items/{item_id}/reextract`）时自动重新走"文本层 + 视觉兜底"。
-- **部署注意**：视觉兜底需要配置一个**支持视觉的多模态 LLM**（默认 `llm.model=gpt-4o-mini` 已支持）。若分析模型不支持视觉，可单独配置 `extraction.vision_model` 指向支持视觉的模型。兜底按页消耗 LLM token，受 `max_ocr_pages` 上限约束。
+- **抽取来源**记录在 `InfoItem.extraction_method`：`text_layer`（文本层可用）/ `ocr_service`（OCR 兜底成功）/ `none`（均未产出有效文本）；历史条目可能为 `vision_llm`（旧视觉 LLM 兜底，兼容保留），并在分析结果接口只读返回，便于追溯。
+- **优雅降级**：OCR 兜底未启用、OCR 服务未配置、或调用失败/超时时，记录警告并保留原文本层内容，不中断同步或分析。
+- **历史回补**：`extraction_method='none'` 或 `content` 为空的历史条目，会在同步 backfill 与手动重抽（`POST /api/info-sources/{source_id}/items/{item_id}/reextract`）时自动重新走"文本层 + OCR 兜底"。
+- **部署注意**：OCR 兜底依赖 `ocr` 配置块指向可用的本地 OCR 服务；模型（`glm-ocr`）由服务自管，`extraction.vision_model` 已废弃（保留键以向后兼容）。glm-ocr 首次推理冷启动较慢，默认 `ocr.timeout_seconds=120`，必要时可调大。兜底按页调用，受 `max_ocr_pages` 上限约束。
+
+## 本地 OCR / 翻译服务
+
+系统对接 NAS 上两套本地服务（CLAUDE.md 架构要求 4/5），均通过 `Authorization: Bearer <api_key>` 鉴权，地址/密钥在 `config/app.json` 的 `ocr` / `translate` 配置块中维护，支持 `ISAS_OCR_*` / `ISAS_TRANSLATE_*` 环境变量覆盖；IP 不通时可改公网域名（`https://ocr.yuan-xin.top` / `https://translate.yuan-xin.top`）。两服务的 `api_key` 在「系统配置」页脱敏只读展示。
+
+- **OCR 服务**（`ocr` 块，`POST /v1/ocr`，`glm-ocr`）：用于上文 PDF OCR 兜底，逐页上传渲染图片识别文本。客户端 `OCRClient` 位于 `src/app/backend/services/clients/ocr_client.py`。
+- **翻译服务**（`translate` 块，`POST /v1/translate`，`translategemma`）：本轮仅提供客户端与配置（`TranslationClient`），尚未接入业务流程，供后续翻译需求（如分析前外文内容翻译）集成。支持 `source`/`target`（默认 `zh-Hans`）/`mode`（`quality`/`fast`）/`format`（`text`/`markdown`）参数。
 
 ## 配置
 
-主配置文件 `config/app.json`，支持 `ISAS_*` 环境变量覆盖。本次新增配置项：
+主配置文件 `config/app.json`，支持 `ISAS_*` 环境变量覆盖。本地 OCR / 翻译服务及抽取相关配置项：
 
 | 配置项 | 默认值 | 环境变量 | 说明 |
 |---|---|---|---|
 | `figures_dir` | `data/figures`（即 `data_dir/figures`） | `ISAS_FIGURES_DIR` | 内嵌图表落盘根目录，启动时自动创建 |
 | `max_figures_per_item` | `20` | `ISAS_MAX_FIGURES_PER_ITEM` | 单文件图表抽取上限，超出截断并记日志 |
-| `extraction.vision_fallback` | `true` | `ISAS_EXTRACTION_VISION_FALLBACK` | 是否启用 PDF 视觉 LLM 兜底抽取 |
-| `extraction.vision_model` | `""`（复用 `llm.model`） | `ISAS_EXTRACTION_VISION_MODEL` | 视觉兜底专用模型，留空则复用 `llm.model` |
-| `extraction.max_ocr_pages` | `10` | `ISAS_EXTRACTION_MAX_OCR_PAGES` | 单文件视觉兜底最大渲染页数，超出截断并记日志 |
+| `ocr.base_url` | `http://192.168.0.100:11980` | `ISAS_OCR_BASE_URL` | NAS 本地 OCR 服务地址（`POST /v1/ocr`，`glm-ocr`） |
+| `ocr.api_key` | （部署时填写） | `ISAS_OCR_API_KEY` | OCR 服务 Bearer 鉴权密钥 |
+| `ocr.timeout_seconds` | `120` | `ISAS_OCR_TIMEOUT` | OCR 单次调用超时（glm-ocr 冷启动较慢，必要时调大） |
+| `ocr.mode` | `text` | `ISAS_OCR_MODE` | OCR 识别模式（`text`/`markdown`/`table`/`formula`） |
+| `ocr.language` | `auto` | `ISAS_OCR_LANGUAGE` | OCR 语言提示 |
+| `translate.base_url` | `http://192.168.0.100:11880` | `ISAS_TRANSLATE_BASE_URL` | NAS 本地翻译服务地址（`POST /v1/translate`，`translategemma`） |
+| `translate.api_key` | （部署时填写） | `ISAS_TRANSLATE_API_KEY` | 翻译服务 Bearer 鉴权密钥 |
+| `translate.timeout_seconds` | `60` | `ISAS_TRANSLATE_TIMEOUT` | 翻译单次调用超时 |
+| `translate.default_target` | `zh-Hans` | `ISAS_TRANSLATE_DEFAULT_TARGET` | 默认目标语言 |
+| `translate.default_mode` | `quality` | `ISAS_TRANSLATE_DEFAULT_MODE` | 默认翻译模式（`quality`/`fast`） |
+| `extraction.vision_fallback` | `true` | `ISAS_EXTRACTION_VISION_FALLBACK` | 是否启用 PDF OCR 兜底抽取 |
+| `extraction.vision_model` | `""` | `ISAS_EXTRACTION_VISION_MODEL` | **已废弃**（OCR 模型由服务自管）；保留键以向后兼容，不再读取 |
+| `extraction.max_ocr_pages` | `10` | `ISAS_EXTRACTION_MAX_OCR_PAGES` | 单文件 OCR 兜底最大渲染页数，超出截断并记日志 |
 | `extraction.min_text_length` | `50` | `ISAS_EXTRACTION_MIN_TEXT_LENGTH` | 文本层可读非空白字符数下限，低于则判定不可用 |
 | `extraction.readable_ratio` | `0.6` | `ISAS_EXTRACTION_READABLE_RATIO` | 文本层可读字符占比阈值，低于则判定不可用 |
-| `extraction.render_dpi` | `150` | `ISAS_EXTRACTION_RENDER_DPI` | 视觉兜底页面渲染 DPI（清晰度与 token 成本平衡） |
+| `extraction.render_dpi` | `150` | `ISAS_EXTRACTION_RENDER_DPI` | OCR 兜底页面渲染 DPI（清晰度与调用成本平衡） |
 
 ## 部署
 

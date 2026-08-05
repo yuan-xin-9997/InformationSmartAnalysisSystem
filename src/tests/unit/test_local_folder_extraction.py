@@ -601,19 +601,18 @@ def test_readable_ratio_value():
     assert _readable_ratio("hello 123") == 1.0  # all alphanumeric
 
 
-# ---------- vision-LLM fallback (PDF) ----------
+# ---------- OCR fallback (PDF) ----------
 
 
-class _RecordingVisionLLM:
-    """Mock multimodal LLM: records chat_with_images calls."""
+class _RecordingOCRClient:
+    """Mock OCR client: records ocr() calls."""
 
     def __init__(self, *args, **kwargs):
-        self.model = kwargs.get("model")
-        self.img_calls: list[tuple] = []
+        self.ocr_calls: list[str] = []
 
-    def chat_with_images(self, system, user_text, images, mime="image/png"):
-        self.img_calls.append((user_text, len(images), mime))
-        return f"[第{len(self.img_calls)}页文本]"
+    def ocr(self, image_bytes, filename=None, mode=None, language=None):
+        self.ocr_calls.append(filename or "")
+        return f"[第{len(self.ocr_calls)}页文本]"
 
 
 def _make_scanned_pdf(path: Path, pages: int = 1) -> None:
@@ -636,31 +635,31 @@ def _enable_vision(monkeypatch):
 _LONG_READABLE = "这是一段足够长的正常中文正文内容，用于通过文本层质量评估。" * 2
 
 
-def test_pdf_text_layer_ok_no_vision(monkeypatch, tmp_path):
-    """Readable text layer -> text_layer method, vision not called."""
+def test_pdf_text_layer_ok_no_ocr(monkeypatch, tmp_path):
+    """Readable text layer -> text_layer method, OCR not called."""
     _enable_vision(monkeypatch)
     from app.backend.services.info_source.local_folder import _extract_pdf_content
 
     pdf = tmp_path / "doc.pdf"
     _make_pdf(pdf, text_lines=[_LONG_READABLE])
-    llm = _RecordingVisionLLM()
-    content, method = _extract_pdf_content(pdf, llm_client=llm)
+    ocr = _RecordingOCRClient()
+    content, method = _extract_pdf_content(pdf, ocr_client=ocr)
     assert method == "text_layer"
-    assert llm.img_calls == []  # no vision call
+    assert ocr.ocr_calls == []  # no OCR call
     assert "正常中文正文" in content
 
 
-def test_pdf_scanned_triggers_vision(monkeypatch, tmp_path):
-    """Empty text layer (scanned) + vision enabled -> vision_llm."""
+def test_pdf_scanned_triggers_ocr(monkeypatch, tmp_path):
+    """Empty text layer (scanned) + fallback enabled -> ocr_service."""
     _enable_vision(monkeypatch)
     from app.backend.services.info_source.local_folder import _extract_pdf_content
 
     pdf = tmp_path / "scan.pdf"
     _make_scanned_pdf(pdf, pages=1)
-    llm = _RecordingVisionLLM()
-    content, method = _extract_pdf_content(pdf, llm_client=llm)
-    assert method == "vision_llm"
-    assert len(llm.img_calls) == 1
+    ocr = _RecordingOCRClient()
+    content, method = _extract_pdf_content(pdf, ocr_client=ocr)
+    assert method == "ocr_service"
+    assert len(ocr.ocr_calls) == 1
     assert content == "[第1页文本]"
 
 
@@ -676,33 +675,33 @@ def test_pdf_max_ocr_pages_truncate(monkeypatch, tmp_path, caplog):
 
     pdf = tmp_path / "big.pdf"
     _make_scanned_pdf(pdf, pages=5)
-    llm = _RecordingVisionLLM()
+    ocr = _RecordingOCRClient()
     with caplog.at_level(logging.WARNING, logger="local_folder"):
-        content, method = _extract_pdf_content(pdf, llm_client=llm)
-    assert method == "vision_llm"
-    assert len(llm.img_calls) == 2  # only 2 of 5 pages
+        content, method = _extract_pdf_content(pdf, ocr_client=ocr)
+    assert method == "ocr_service"
+    assert len(ocr.ocr_calls) == 2  # only 2 of 5 pages
     assert any("仅处理前 2 页" in r.getMessage() for r in caplog.records)
 
 
-def test_vision_failure_degrades_to_none(monkeypatch, tmp_path):
-    """Vision LLM raises -> degrade to extraction_method=none, no exception."""
+def test_ocr_failure_degrades_to_none(monkeypatch, tmp_path):
+    """OCR raises -> degrade to extraction_method=none, no exception."""
 
     _enable_vision(monkeypatch)
     from app.backend.services.info_source.local_folder import _extract_pdf_content
 
-    class _FailingLLM:
-        def chat_with_images(self, *a, **kw):
-            raise RuntimeError("vision endpoint down")
+    class _FailingOCR:
+        def ocr(self, *a, **kw):
+            raise RuntimeError("ocr endpoint down")
 
     pdf = tmp_path / "scan.pdf"
     _make_scanned_pdf(pdf, pages=1)
-    content, method = _extract_pdf_content(pdf, llm_client=_FailingLLM())
+    content, method = _extract_pdf_content(pdf, ocr_client=_FailingOCR())
     assert method == "none"
-    assert content == ""  # text layer was empty, vision failed
+    assert content == ""  # text layer was empty, OCR failed
 
 
-def test_vision_disabled_uses_text_layer_only(monkeypatch, tmp_path):
-    """vision_fallback=False -> no vision call even when text layer is poor."""
+def test_ocr_disabled_uses_text_layer_only(monkeypatch, tmp_path):
+    """vision_fallback=False -> no OCR call even when text layer is poor."""
     import app.backend.services.info_source.local_folder as lf
 
     monkeypatch.setattr(lf.settings, "extraction_vision_fallback", False)
@@ -710,38 +709,57 @@ def test_vision_disabled_uses_text_layer_only(monkeypatch, tmp_path):
 
     pdf = tmp_path / "scan.pdf"
     _make_scanned_pdf(pdf, pages=1)
-    llm = _RecordingVisionLLM()
-    content, method = _extract_pdf_content(pdf, llm_client=llm)
+    ocr = _RecordingOCRClient()
+    content, method = _extract_pdf_content(pdf, ocr_client=ocr)
     assert method == "none"
-    assert llm.img_calls == []
+    assert ocr.ocr_calls == []
     assert content == ""
 
 
-def test_vision_model_independent_config(monkeypatch, tmp_path):
-    """vision_model is used when constructing the LLMClient (not llm.model)."""
+def test_ocr_client_constructed_internally_when_none(monkeypatch, tmp_path):
+    """When ocr_client=None, _vision_extract_pdf constructs OCRClient from settings."""
     _enable_vision(monkeypatch)
-    import app.backend.services.analysis.llm_client as llm_mod
+    import app.backend.services.clients.ocr_client as ocr_mod
     import app.backend.services.info_source.local_folder as lf
 
-    monkeypatch.setattr(lf.settings, "extraction_vision_model", "gpt-4o")
+    monkeypatch.setattr(lf.settings, "extraction_max_ocr_pages", 1)
 
     captured: dict = {}
 
-    class _MockLLMClass:
+    class _MockOCRClass:
         def __init__(self, *args, **kwargs):
-            captured["model"] = kwargs.get("model")
+            captured["constructed"] = True
 
-        def chat_with_images(self, *a, **kw):
-            return "vision text"
+        def ocr(self, image_bytes, filename=None, mode=None, language=None):
+            captured["called"] = True
+            return "ocr text"
 
-    monkeypatch.setattr(llm_mod, "LLMClient", _MockLLMClass)
+    monkeypatch.setattr(ocr_mod, "OCRClient", _MockOCRClass)
     from app.backend.services.info_source.local_folder import _extract_pdf_content
 
     pdf = tmp_path / "scan.pdf"
     _make_scanned_pdf(pdf, pages=1)
-    content, method = _extract_pdf_content(pdf, llm_client=None)  # construct internally
-    assert method == "vision_llm"
-    assert captured["model"] == "gpt-4o"
+    content, method = _extract_pdf_content(pdf, ocr_client=None)  # construct internally
+    assert method == "ocr_service"
+    assert captured.get("constructed") is True
+    assert captured.get("called") is True
+    assert content == "ocr text"
+
+
+def test_ocr_unconfigured_degrades_to_none(monkeypatch, tmp_path):
+    """OCR service not configured (empty base_url/api_key) -> degrade to none."""
+    _enable_vision(monkeypatch)
+    import app.backend.services.info_source.local_folder as lf
+
+    monkeypatch.setattr(lf.settings, "ocr_base_url", "")
+    monkeypatch.setattr(lf.settings, "ocr_api_key", "")
+    from app.backend.services.info_source.local_folder import _extract_pdf_content
+
+    pdf = tmp_path / "scan.pdf"
+    _make_scanned_pdf(pdf, pages=1)
+    content, method = _extract_pdf_content(pdf, ocr_client=None)
+    assert method == "none"
+    assert content == ""
 
 
 def test_extract_full_carries_extraction_method(tmp_path):

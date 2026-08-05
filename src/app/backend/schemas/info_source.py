@@ -77,7 +77,7 @@ class SourceFileOut(ORMBase):
     author_affiliation: str | None
     published_at: BeijingDatetime | None
     page_count: int | None
-    extraction_method: str | None = None  # text_layer | vision_llm | none
+    extraction_method: str | None = None  # text_layer | ocr_service | vision_llm(历史) | none
     file_url: str                 # /api/info-sources/{source_id}/items/{item_id}/file
     figures: list[InfoItemFigureOut] = []
 

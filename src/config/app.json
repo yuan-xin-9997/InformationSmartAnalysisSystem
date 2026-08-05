@@ -64,5 +64,19 @@
     "min_text_length": 50,
     "readable_ratio": 0.6,
     "render_dpi": 150
+  },
+  "ocr": {
+    "base_url": "http://192.168.0.100:11980",
+    "api_key": "c20d02024ae9402f8963bfad819213f0701d51894806b1cc638b3d7a5434da06",
+    "timeout_seconds": 120,
+    "mode": "text",
+    "language": "auto"
+  },
+  "translate": {
+    "base_url": "http://192.168.0.100:11880",
+    "api_key": "48689f5f386ea97ea7b6bb32deb6c1f3700d1a709104ecc1b1619406ac3f9c4a",
+    "timeout_seconds": 60,
+    "default_target": "zh-Hans",
+    "default_mode": "quality"
   }
 }

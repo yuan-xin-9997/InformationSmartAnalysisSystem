@@ -127,12 +127,40 @@ class Settings:
         self.email_from_email: str = _env("ISAS_EMAIL_FROM_EMAIL", em.get("from_email", ""))
         self.email_from_name: str = _env("ISAS_EMAIL_FROM_NAME", em.get("from_name", "信息智能分析系统"))
 
-        # 正文抽取策略（视觉 LLM 兜底）：当 PDF 文本层不可用时，把页面渲染成
-        # 图片调用多模态 LLM 提取正文。仅在文本层失败时触发，原生数字 PDF 无影响。
+        # NAS 本地 OCR 服务（基于 ollama / glm-ocr，CLAUDE.md 架构要求 5）。
+        # 用于 PDF 文本层不可用时的视觉兜底正文抽取（见 ``extraction`` 节）。
+        ocr = raw.get("ocr", {})
+        self.ocr_base_url: str = _env("ISAS_OCR_BASE_URL", ocr.get("base_url", ""))
+        self.ocr_api_key: str = _env("ISAS_OCR_API_KEY", ocr.get("api_key", ""))
+        self.ocr_timeout_seconds: int = int(
+            _env("ISAS_OCR_TIMEOUT", ocr.get("timeout_seconds", 120))
+        )
+        self.ocr_mode: str = _env("ISAS_OCR_MODE", ocr.get("mode", "text"))
+        self.ocr_language: str = _env("ISAS_OCR_LANGUAGE", ocr.get("language", "auto"))
+
+        # NAS 本地翻译服务（基于 ollama / translategemma，CLAUDE.md 架构要求 4）。
+        # 当前仅提供客户端与配置，尚未接入业务流程。
+        tr = raw.get("translate", {})
+        self.translate_base_url: str = _env("ISAS_TRANSLATE_BASE_URL", tr.get("base_url", ""))
+        self.translate_api_key: str = _env("ISAS_TRANSLATE_API_KEY", tr.get("api_key", ""))
+        self.translate_timeout_seconds: int = int(
+            _env("ISAS_TRANSLATE_TIMEOUT", tr.get("timeout_seconds", 60))
+        )
+        self.translate_default_target: str = _env(
+            "ISAS_TRANSLATE_DEFAULT_TARGET", tr.get("default_target", "zh-Hans")
+        )
+        self.translate_default_mode: str = _env(
+            "ISAS_TRANSLATE_DEFAULT_MODE", tr.get("default_mode", "quality")
+        )
+
+        # 正文抽取策略（视觉兜底）：当 PDF 文本层不可用时，把页面渲染成图片
+        # 调用 NAS 本地 OCR 服务提取正文。仅在文本层失败时触发，原生数字 PDF 无影响。
         ex = raw.get("extraction", {})
         self.extraction_vision_fallback: bool = _env(
             "ISAS_EXTRACTION_VISION_FALLBACK", ex.get("vision_fallback", True)
         ) in (True, "true", "True", 1, "1")
+        # 已废弃：视觉兜底改用本地 OCR 服务（模型由服务自管），此字段仅保留读取
+        # 以向后兼容旧 app.json，不再被兜底逻辑使用。见 OCRClient。
         self.extraction_vision_model: str = _env(
             "ISAS_EXTRACTION_VISION_MODEL", ex.get("vision_model", "")
         )
