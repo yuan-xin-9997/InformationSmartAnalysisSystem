@@ -4,7 +4,7 @@
 
 当文本层不可用且视觉兜底启用时，系统 SHALL 用 PyMuPDF `page.get_pixmap()` 把 PDF 页面渲染为图片（可配置 DPI，默认 150），逐页调用 NAS 本地 OCR 服务（`POST /v1/ocr`，基于视觉 LLM `glm-ocr`，`Authorization: Bearer <api_key>` 鉴权，multipart 上传该页 PNG，`mode` 默认 `text`、`language` 默认 `auto`）提取该页正文文本，取响应 `text` 字段，按页序拼接为整篇 `content` 落库。渲染页数 MUST 受可配置上限（默认 10 页）约束，超限时截断并在日志记录已截断。兜底所用 OCR 模型由 OCR 服务自管，系统 MUST NOT 再配置兜底视觉模型；`extraction.vision_model` 配置项废弃（保留键以向后兼容，不再读取）。兜底抽取产生的 `content` MUST 为纯文本，沿用既有"先抽取、后分析"流程，分析侧无感知。
 
-#### Scenario: 渲染页面并调用 OCR 服务提取正文
+#### Scenario: 渲染页面并视觉提取正文
 - **WHEN** 文本层不可用且视觉兜底启用
 - **THEN** 系统把各页渲染成 PNG 图片，逐页以 multipart 上传至本地 OCR 服务 `POST /v1/ocr` 提取文本，按页序拼接后作为 `content`，`extraction_method` 记为 `ocr_service`
 
@@ -12,9 +12,9 @@
 - **WHEN** 一个 30 页扫描件 PDF 且最大渲染页数配置为 10
 - **THEN** 系统只对前 10 页做 OCR 抽取，并在日志记录已截断
 
-#### Scenario: OCR 模型由服务自管且视觉模型配置废弃
-- **WHEN** 视觉兜底调用本地 OCR 服务
-- **THEN** OCR 模型由 OCR 服务自管（`glm-ocr`），系统不再配置兜底视觉模型；`extraction.vision_model` 即便存在也被忽略，不影响兜底调用
+#### Scenario: 视觉模型可独立配置
+- **WHEN** 配置了 `extraction.vision_model`（旧视觉兜底模型配置）
+- **THEN** 视觉兜底改用本地 OCR 服务，模型由服务自管（`glm-ocr`）；`extraction.vision_model` 已废弃、被忽略，不影响兜底调用
 
 ### Requirement: 正文抽取方式记录与追溯
 
@@ -24,7 +24,7 @@
 - **WHEN** 文本层抽取结果通过质量评估
 - **THEN** 该 `InfoItem.extraction_method` 记为 `text_layer`
 
-#### Scenario: 记录 OCR 来源
+#### Scenario: 记录视觉来源
 - **WHEN** 视觉兜底（本地 OCR 服务）成功产出非空正文文本
 - **THEN** 该 `InfoItem.extraction_method` 记为 `ocr_service`
 
@@ -40,10 +40,10 @@
 - **WHEN** `extraction.vision_fallback` 配置为 false
 - **THEN** 文本层不可用时直接记 `extraction_method=none`，不调用 OCR 服务
 
-#### Scenario: OCR 服务未配置时优雅降级
+#### Scenario: LLM 未配置时优雅降级
 - **WHEN** 视觉兜底启用但 `ocr.base_url` 或 `ocr.api_key` 未配置
 - **THEN** 系统记录警告并跳过兜底抽取，`extraction_method=none`，同步继续不报错
 
-#### Scenario: OCR 调用失败时降级
+#### Scenario: 视觉调用失败时降级
 - **WHEN** 本地 OCR 服务调用返回错误或超时
 - **THEN** 系统记录警告，`extraction_method=none`，`content` 保留文本层原值，不中断同步
