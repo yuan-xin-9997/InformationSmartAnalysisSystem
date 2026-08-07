@@ -55,6 +55,77 @@ def test_push_run_cascade_on_rule_delete(client):
         assert db.query(PushRun).filter(PushRun.rule_id == rid).count() == 0
 
 
+def test_push_run_persists_email_content_fields(client):
+    """push-email-preview-inline-figures: PushRun 留存 subject/email_html/attachment_summary。"""
+    with SessionLocal() as db:
+        rule = PushRule(
+            name="rc",
+            task_id=None,
+            event_types=["per_item"],
+            recipients=["a@x.com"],
+            trigger_mode="manual",
+        )
+        db.add(rule)
+        db.commit()
+        db.refresh(rule)
+        db.add(
+            PushRun(
+                rule_id=rule.id,
+                trigger_mode="manual",
+                recipients=["a@x.com"],
+                event_count=2,
+                status="succeeded",
+                subject="【信息分析】rc - 2条新事件",
+                email_html="<div>预览正文</div>",
+                attachment_summary=[
+                    {"filename": "报告.pdf", "kind": "file"},
+                    {"filename": "报告_0.png", "kind": "figure"},
+                ],
+            )
+        )
+        db.commit()
+        rid = rule.id
+    with SessionLocal() as db:
+        run = db.query(PushRun).filter(PushRun.rule_id == rid).one()
+        assert run.subject == "【信息分析】rc - 2条新事件"
+        assert run.email_html == "<div>预览正文</div>"
+        assert run.attachment_summary == [
+            {"filename": "报告.pdf", "kind": "file"},
+            {"filename": "报告_0.png", "kind": "figure"},
+        ]
+
+
+def test_push_run_new_fields_default_none(client):
+    """旧风格 PushRun（不填留存字段）新列为 NULL。"""
+    with SessionLocal() as db:
+        rule = PushRule(
+            name="rd",
+            task_id=None,
+            event_types=["per_item"],
+            recipients=["a@x.com"],
+            trigger_mode="manual",
+        )
+        db.add(rule)
+        db.commit()
+        db.refresh(rule)
+        db.add(
+            PushRun(
+                rule_id=rule.id,
+                trigger_mode="manual",
+                recipients=["a@x.com"],
+                event_count=0,
+                status="no_new",
+            )
+        )
+        db.commit()
+        rid = rule.id
+    with SessionLocal() as db:
+        run = db.query(PushRun).filter(PushRun.rule_id == rid).one()
+        assert run.subject is None
+        assert run.email_html is None
+        assert run.attachment_summary is None
+
+
 def test_smtp_config_singleton_roundtrip(client):
     with SessionLocal() as db:
         cfg = get_smtp_config_row(db)

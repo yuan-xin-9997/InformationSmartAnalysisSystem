@@ -34,7 +34,7 @@ from ..schemas.analysis import (
     TaskSourceOut,
 )
 from ..schemas.info_source import InfoItemFigureOut, SourceFileOut
-from ..schemas.push import PushRunOut
+from ..schemas.push import PushRunOut, PushRunPreviewOut
 from ..services import worker
 from ..services.analysis import run_analysis
 from ..services import scheduler as sched_svc
@@ -432,10 +432,61 @@ def list_push_runs(
     pr = db.scalar(select(PushRule).where(PushRule.task_id == task_id))
     if pr is None:
         return []
-    return (
-        db.scalars(
-            select(PushRun).where(PushRun.rule_id == pr.id).order_by(PushRun.id.desc())
-        ).all()
+    runs = db.scalars(
+        select(PushRun).where(PushRun.rule_id == pr.id).order_by(PushRun.id.desc())
+    ).all()
+    return [_serialize_push_run(r) for r in runs]
+
+
+def _serialize_push_run(run: PushRun) -> dict:
+    """序列化 PushRun -> dict（push-email-preview-inline-figures）。
+
+    显式计算 ``has_preview``（派生自 ``email_html``），避免 Pydantic 对
+    ``@property`` 派生字段在 ``from_attributes`` 模式下的读取差异。
+    """
+    return {
+        "id": run.id,
+        "rule_id": run.rule_id,
+        "trigger_mode": run.trigger_mode,
+        "recipients": run.recipients,
+        "event_count": run.event_count,
+        "status": run.status,
+        "error": run.error,
+        "subject": run.subject,
+        "attachment_summary": run.attachment_summary,
+        "has_preview": run.has_preview,
+        "started_at": run.started_at,
+        "finished_at": run.finished_at,
+        "created_at": run.created_at,
+    }
+
+
+@router.get(
+    "/{task_id}/push/runs/{run_id}/preview",
+    response_model=PushRunPreviewOut,
+)
+def get_push_run_preview(
+    task_id: int,
+    run_id: int,
+    _: User = Depends(require_page("analysis_tasks")),
+    db: Session = Depends(get_db),
+):
+    """推送历史邮件预览（push-email-preview-inline-figures）。"""
+    task = db.get(AnalysisTask, task_id)
+    if task is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "分析任务不存在")
+    pr = db.scalar(select(PushRule).where(PushRule.task_id == task_id))
+    if pr is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "该任务未配置推送")
+    run = db.get(PushRun, run_id)
+    if run is None or run.rule_id != pr.id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "推送记录不存在")
+    if run.email_html is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "该推送记录无可预览内容")
+    return PushRunPreviewOut(
+        subject=run.subject,
+        html=run.email_html,
+        attachments=run.attachment_summary,
     )
 
 

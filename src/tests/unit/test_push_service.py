@@ -48,12 +48,16 @@ class _FakeChannel:
         self.fail_on = fail_on  # 1-based call index that raises
         self.n = 0
         self.calls: list[str] = []
+        self.sent_htmls: list[str] = []
+        self.sent_inlines: list[list] = []
 
-    def send(self, cfg, recipients, subject, html, text, attachments=None):
+    def send(self, cfg, recipients, subject, html, text, attachments=None, inline_images=None):
         self.n += 1
         if self.fail_on and self.n == self.fail_on:
             raise RuntimeError("smtp boom")
         self.calls.append(subject)
+        self.sent_htmls.append(html)
+        self.sent_inlines.append(inline_images or [])
 
 
 def _patch_channel(monkeypatch, channel):
@@ -344,3 +348,139 @@ def test_to_push_event_aggregate_has_no_item_fields(client):
     assert e.item_title is None
     assert e.file_path is None
     assert e.author is None
+
+
+# ---- push-email-preview-inline-figures: 邮件内容留存 ----
+
+import pathlib
+import tempfile
+from app.backend.core.config import settings
+from app.backend.models.info_source import InfoItem, InfoItemFigure, InfoSource
+
+
+def _make_per_item_with_figure(db, task_id, run_id, src, fig_bytes=b"\x89PNG\r\n\x1a\n fake"):
+    """Create an InfoItem + figure file under figures_dir + per_item AnalysisResult."""
+    item = InfoItem(
+        source_id=src.id, external_id="http://x/a.html", title="doc.html", content="c",
+    )
+    db.add(item)
+    db.flush()
+    fd = pathlib.Path(settings.figures_dir)
+    fd.mkdir(parents=True, exist_ok=True)
+    fp = fd / f"fig_{item.id}_0.png"
+    fp.write_bytes(fig_bytes)
+    db.add(InfoItemFigure(item_id=item.id, figure_index=0, storage_path=str(fp), mime="image/png"))
+    r = AnalysisResult(
+        task_run_id=run_id, task_id=task_id, source_id=src.id,
+        info_item_id=item.id, result_type="per_item", content="分析内容",
+    )
+    db.add(r)
+    db.commit()
+    db.refresh(r)
+    return r
+
+
+def test_succeeded_push_persists_email_html_with_data_urls(client, monkeypatch):
+    """成功推送：PushRun 留存 subject/email_html（图表 data:）/attachment_summary。"""
+    with SessionLocal() as db:
+        _setup_smtp(db)
+        task = AnalysisTask(name="T", config={})
+        db.add(task)
+        db.flush()
+        run = TaskRun(kind="analysis", ref_id=task.id, ref_name="T", status="succeeded")
+        db.add(run)
+        db.flush()
+        src = InfoSource(name="网站", type="website", config={"url": "http://x"})
+        db.add(src)
+        db.flush()
+        r = _make_per_item_with_figure(db, task.id, run.id, src)
+        rule = PushRule(
+            name="r", task_id=task.id, event_types=["per_item"],
+            recipients=["a@x.com"], trigger_mode="manual",
+        )
+        db.add(rule)
+        db.commit()
+        rid = rule.id
+    fake = _FakeChannel()
+    _patch_channel(monkeypatch, fake)
+    push_service.run_push(rid, "manual")
+    with SessionLocal() as db:
+        run_row = db.query(PushRun).filter(PushRun.rule_id == rid).one()
+        assert run_row.status == "succeeded"
+        assert run_row.subject is not None
+        assert "1条新事件" in run_row.subject
+        # 预览 HTML：图表以 data: 内嵌（浏览器可渲染），不再有 cid:
+        assert "data:image/png;base64," in run_row.email_html
+        assert "cid:" not in (run_row.email_html or "")
+        assert "分析内容" in run_row.email_html
+        # 附件清单：图表（来自内联图）
+        assert run_row.attachment_summary is not None
+        kinds = {a["kind"] for a in run_row.attachment_summary}
+        assert "figure" in kinds
+
+
+def test_no_new_does_not_persist_email_content(client, monkeypatch):
+    with SessionLocal() as db:
+        _setup_smtp(db)
+        tid, rids = _make_task(db, "T", [("per_item", "c1")])
+        rule = PushRule(
+            name="r", task_id=tid, event_types=["per_item"], recipients=["a@x.com"],
+            trigger_mode="manual", last_pushed_result_id=rids[0],
+        )
+        db.add(rule)
+        db.commit()
+        rid = rule.id
+    push_service.run_push(rid, "manual")
+    with SessionLocal() as db:
+        run_row = db.query(PushRun).filter(PushRun.rule_id == rid).one()
+        assert run_row.status == "no_new"
+        assert run_row.subject is None
+        assert run_row.email_html is None
+        assert run_row.attachment_summary is None
+
+
+def test_multi_batch_merges_preview_html(client, monkeypatch):
+    """多批：1 条 PushRun，email_html 含多封分隔。"""
+    with SessionLocal() as db:
+        _setup_smtp(db)
+        tid, _ = _make_task(db, "T", [("per_item", f"c{i}") for i in range(5)])
+        rule = PushRule(
+            name="r", task_id=tid, event_types=["per_item"], recipients=["a@x.com"],
+            trigger_mode="manual", max_events_per_email=2,  # 5 -> 3 批
+        )
+        db.add(rule)
+        db.commit()
+        rid = rule.id
+    fake = _FakeChannel()
+    _patch_channel(monkeypatch, fake)
+    push_service.run_push(rid, "manual")
+    with SessionLocal() as db:
+        run_row = db.query(PushRun).filter(PushRun.rule_id == rid).one()
+        assert run_row.status == "succeeded"
+        assert "第 1 封 / 共 3 封" in run_row.email_html
+        assert "第 2 封 / 共 3 封" in run_row.email_html
+        assert "第 3 封 / 共 3 封" in run_row.email_html
+
+
+def test_failure_after_first_batch_keeps_partial_preview(client, monkeypatch):
+    """第 2 批失败：状态 failed，email_html 仍留存第 1 批内容。"""
+    with SessionLocal() as db:
+        _setup_smtp(db)
+        tid, _ = _make_task(db, "T", [("per_item", f"c{i}") for i in range(5)])
+        rule = PushRule(
+            name="r", task_id=tid, event_types=["per_item"], recipients=["a@x.com"],
+            trigger_mode="manual", max_events_per_email=2,
+        )
+        db.add(rule)
+        db.commit()
+        rid = rule.id
+    fake = _FakeChannel(fail_on=2)
+    _patch_channel(monkeypatch, fake)
+    push_service.run_push(rid, "manual")
+    with SessionLocal() as db:
+        run_row = db.query(PushRun).filter(PushRun.rule_id == rid).one()
+        assert run_row.status == "failed"
+        # 第 1 批成功：邮件正文留存；无多封分隔
+        assert run_row.email_html is not None
+        assert "c0" in run_row.email_html
+        assert "第 1 封" not in run_row.email_html  # 单批无分隔

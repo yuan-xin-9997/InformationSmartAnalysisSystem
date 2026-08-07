@@ -161,7 +161,7 @@ def test_push_flow(client, admin_headers, sync_worker, mock_llm, monkeypatch):
     monkeypatch.setattr(
         email_channel.EmailChannel,
         "send",
-        lambda self, cfg, recipients, subject, html, text, attachments=None: sent.append((list(recipients), subject)),
+        lambda self, cfg, recipients, subject, html, text, attachments=None, inline_images=None: sent.append((list(recipients), subject)),
     )
 
     # 建源 + 同步 + 任务 + 跑出分析结果

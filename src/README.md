@@ -159,7 +159,7 @@ Linux 亦可使用 `systemctl start/stop/status/restart isas`。
 | 系统配置 | `GET /api/config` |
 | 任务中心 | `GET /api/task-center/runs`（支持 `ref_id`/`kind`/`status` 过滤）、`GET .../runs/{id}`、`GET .../runs/{id}/logs`、`DELETE .../runs/{id}` |
 | 信息源 | `GET /api/info-sources/types`、`GET/POST/PUT/DELETE /api/info-sources`、`POST .../{id}/check`、`POST .../{id}/sync`、`GET .../{id}/status`、`GET .../{id}/items` |
-| 分析任务 | `GET/POST/PUT/DELETE /api/analysis-tasks`、`POST .../{id}/run`、`GET .../{id}/sources`、`GET .../{id}/results`（支持 `run_id` 过滤） |
+| 分析任务 | `GET/POST/PUT/DELETE /api/analysis-tasks`、`POST .../{id}/run`、`POST .../{id}/push/trigger`、`GET .../{id}/push/runs`、`GET .../{id}/push/runs/{run_id}/preview`、`GET .../{id}/sources`、`GET .../{id}/results`（支持 `run_id` 过滤） |
 | 定时任务 | `GET/POST /api/scheduled-jobs`、`PUT/DELETE /api/scheduled-jobs/{id}`、`POST .../{id}/toggle`、`POST .../{id}/run` |
 | 推送 | `GET/PUT /api/push/smtp`、`POST /api/push/smtp/test`、`GET/POST/PUT/DELETE /api/push/rules`、`POST /api/push/rules/{id}/trigger`、`GET /api/push/rules/{id}/runs` |
 

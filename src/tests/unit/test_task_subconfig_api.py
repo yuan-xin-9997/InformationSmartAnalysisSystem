@@ -237,7 +237,7 @@ def test_push_trigger_and_history(client, admin_headers, monkeypatch, sync_worke
     monkeypatch.setattr(
         email_channel.EmailChannel,
         "send",
-        lambda self, cfg, recipients, subject, html, text, attachments=None: sent.append(list(recipients)),
+        lambda self, cfg, recipients, subject, html, text, attachments=None, inline_images=None: sent.append(list(recipients)),
     )
     _patch_push_sched(monkeypatch)
 

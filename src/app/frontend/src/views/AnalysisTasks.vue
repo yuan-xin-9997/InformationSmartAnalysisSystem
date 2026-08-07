@@ -287,6 +287,7 @@
                 <h3>{{ statusLabel(run.status) }}</h3>
                 <span class="pill">{{ triggerLabel(run.trigger_mode) }}</span>
                 <span class="pill">{{ run.event_count }} 条</span>
+                <span v-if="run.subject" class="pill" style="background:#eef">主题: {{ run.subject }}</span>
               </div>
               <div class="meta">
                 <span>收件: {{ run.recipients.join('; ') }}</span>
@@ -295,7 +296,45 @@
                 <span v-if="run.error" class="pill" style="color:#c00">错误: {{ run.error }}</span>
               </div>
             </div>
+            <div class="item-actions">
+              <button
+                v-if="run.has_preview"
+                type="button"
+                @click="openPushRunPreview(run)"
+                title="预览本次推送的邮件内容（含正文内嵌图表）"
+              >预览邮件</button>
+            </div>
           </article>
+        </div>
+      </div>
+    </div>
+
+    <!-- 推送历史邮件预览（push-email-preview-inline-figures） -->
+    <div v-if="previewVisible" class="modal" @click.self="closePushRunPreview">
+      <div class="modal-card large">
+        <div class="modal-head">
+          <div>
+            <p class="eyebrow">PUSH PREVIEW</p>
+            <h2>邮件预览 - {{ preview?.subject || '(无主题)' }}</h2>
+          </div>
+          <button type="button" @click="closePushRunPreview">×</button>
+        </div>
+        <div v-if="previewLoading" class="empty compact">加载中...</div>
+        <div v-else-if="!preview?.html" class="empty compact">无可预览内容</div>
+        <div v-else style="display:flex;flex-direction:column;gap:10px;min-height:480px">
+          <div class="meta">
+            <span>附件 {{ preview.attachments?.length || 0 }} 个</span>
+            <span v-if="preview.attachments?.length">
+              （{{ (preview.attachments || []).map((a: any) => a.filename).join(', ') }}）
+            </span>
+          </div>
+          <iframe
+            :srcdoc="preview.html"
+            sandbox="allow-same-origin"
+            referrerpolicy="no-referrer"
+            style="width:100%;height:60vh;border:1px solid #dde;border-radius:6px;background:#fff"
+            title="邮件预览"
+          ></iframe>
         </div>
       </div>
     </div>
@@ -336,7 +375,7 @@ import {
   runScheduleNowApi, triggerPushApi, listPushRunsApi,
   type AnalysisTaskDetail, type TaskSourceOut, type ScheduleConfig, type PushConfig,
 } from '@/api/tasks'
-import { getSmtpApi, putSmtpApi, testSmtpApi, type PushRun } from '@/api/push'
+import { getSmtpApi, putSmtpApi, testSmtpApi, getPushRunPreviewApi, type PushRun, type PushRunPreview } from '@/api/push'
 
 const router = useRouter()
 const tasks = ref<AnalysisTaskDetail[]>([])
@@ -380,6 +419,11 @@ const recipientsText = ref('')
 const historyVisible = ref(false)
 const historyTask = ref<AnalysisTaskDetail | null>(null)
 const runs = ref<PushRun[]>([])
+
+// 推送历史邮件预览（push-email-preview-inline-figures）
+const previewVisible = ref(false)
+const previewLoading = ref(false)
+const preview = ref<PushRunPreview | null>(null)
 
 // SMTP
 const smtpCollapsed = ref(true)
@@ -624,6 +668,27 @@ async function openPushHistory(t: AnalysisTaskDetail) {
   historyVisible.value = true
   runs.value = []
   runs.value = await listPushRunsApi(t.id)
+}
+
+// 推送历史邮件预览（push-email-preview-inline-figures）
+async function openPushRunPreview(run: PushRun) {
+  if (!historyTask.value) return
+  previewVisible.value = true
+  previewLoading.value = true
+  preview.value = null
+  try {
+    preview.value = await getPushRunPreviewApi(historyTask.value.id, run.id)
+  } catch (e: any) {
+    showToast(`预览失败: ${e?.response?.data?.detail || e?.message || e}`)
+    previewVisible.value = false
+  } finally {
+    previewLoading.value = false
+  }
+}
+
+function closePushRunPreview() {
+  previewVisible.value = false
+  preview.value = null
 }
 
 function goResults(taskId: number) {

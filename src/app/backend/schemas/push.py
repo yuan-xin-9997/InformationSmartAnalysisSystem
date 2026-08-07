@@ -1,7 +1,7 @@
 """Push schemas: SMTP config, push rules, push runs (history)."""
 from __future__ import annotations
 
-from pydantic import BaseModel
+from pydantic import BaseModel, model_validator
 
 from .common import BeijingDatetime, ORMBase
 
@@ -40,7 +40,19 @@ class PushRunOut(ORMBase):
     event_count: int
     status: str
     error: str | None
+    # push-email-preview-inline-figures：邮件内容留存字段
+    subject: str | None = None
+    attachment_summary: list | None = None
+    has_preview: bool = False
     started_at: BeijingDatetime | None
     finished_at: BeijingDatetime | None
     created_at: BeijingDatetime
+
+
+class PushRunPreviewOut(BaseModel):
+    """推送历史预览接口返回（push-email-preview-inline-figures）。"""
+
+    subject: str | None = None
+    html: str | None = None
+    attachments: list | None = None
 

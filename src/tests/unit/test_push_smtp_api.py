@@ -55,7 +55,7 @@ def test_test_smtp_ok(client, admin_headers, monkeypatch):
 
     sent = {}
 
-    def _fake_send(self, cfg, recipients, subject, html, text):
+    def _fake_send(self, cfg, recipients, subject, html, text, attachments=None, inline_images=None):
         sent["recipients"] = list(recipients)
         sent["subject"] = subject
 

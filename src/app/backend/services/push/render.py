@@ -7,13 +7,14 @@ escapes raw HTML tags for email safety).
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from html import escape
 
 import mistune
 
 from ...core.timeutil import format_beijing
+from .attachments import InlineImage
 
 _TYPE_LABELS = {"per_item": "逐条分析", "aggregate": "汇总分析"}
 
@@ -38,6 +39,8 @@ class PushEvent:
     author_affiliation: str | None = None
     article_published_at: datetime | None = None
     page_count: int | None = None
+    # per_item 事件的内嵌图表（携带字节，渲染只取 cid；channel 据此构造内联 MIME）。
+    figures: list[InlineImage] = field(default_factory=list)
 
 
 def _label(result_type: str) -> str:
@@ -94,6 +97,19 @@ def _meta_lines_text(e: PushEvent) -> list[str]:
     return lines
 
 
+def _figures_html(e: PushEvent) -> str:
+    """Inline-figure block for a per_item event; empty for aggregate / no figures."""
+    if e.result_type != "per_item" or not e.figures:
+        return ""
+    imgs = "".join(
+        f'<img src="cid:{fig.cid}" alt="{escape(fig.filename)}" '
+        f'style="max-width:100%;height:auto;border:1px solid #eee;'
+        f'margin:4px 4px 0 0;" />'
+        for fig in e.figures
+    )
+    return '<div style="margin-top:8px;">' + imgs + "</div>"
+
+
 def _event_html(e: PushEvent) -> str:
     time_str = escape(format_beijing(e.created_at) or "")
     header = (
@@ -104,7 +120,12 @@ def _event_html(e: PushEvent) -> str:
         f'<span style="color:#999;margin-left:8px;float:right;">{time_str}</span>'
         "</td></tr>"
     )
-    body = '<tr><td style="padding:8px 12px;">' + _md(e.content or "") + "</td></tr>"
+    body = (
+        '<tr><td style="padding:8px 12px;">'
+        + _md(e.content or "")
+        + _figures_html(e)
+        + "</td></tr>"
+    )
     return (
         '<table border="0" cellpadding="0" cellspacing="0" style="border-collapse:collapse;'
         'width:100%;margin-bottom:16px;border:1px solid #ddd;border-radius:4px;">'
@@ -115,8 +136,12 @@ def _event_html(e: PushEvent) -> str:
     )
 
 
-def render_events(rule_name: str, events: list[PushEvent]) -> tuple[str, str, str]:
-    """Return ``(subject, html, text)`` for a batch of events."""
+def render_events(rule_name: str, events: list[PushEvent]) -> tuple[str, str, str, list[InlineImage]]:
+    """Return ``(subject, html, text, inline_images)`` for a batch of events.
+
+    ``inline_images`` aggregates every per_item event's figures (with bytes) so
+    the email channel can attach them as ``Content-ID`` inline MIME parts.
+    """
     n = len(events)
     subject = f"【信息分析】{rule_name} - {n}条新事件"
 
@@ -139,4 +164,8 @@ def render_events(rule_name: str, events: list[PushEvent]) -> tuple[str, str, st
         lines.append("")
     text = "\n".join(lines)
 
-    return subject, html, text
+    inline_images = [
+        fig for e in events for fig in (e.figures or []) if e.result_type == "per_item"
+    ]
+
+    return subject, html, text, inline_images

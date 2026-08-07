@@ -64,6 +64,10 @@ def init_db() -> None:
     _ensure_column(engine, "info_items", "extraction_method", "TEXT")
     # 推送规则 1:1 化（consolidate-task-analysis-page）：新增 task_id 列。
     _ensure_column(engine, "push_rules", "task_id", "INTEGER")
+    # 推送历史邮件内容留存（push-email-preview-inline-figures）。
+    _ensure_column(engine, "push_runs", "subject", "TEXT")
+    _ensure_column(engine, "push_runs", "email_html", "TEXT")
+    _ensure_column(engine, "push_runs", "attachment_summary", "JSON")
     # 三页合一迁移：拆分多任务推送规则、收敛多余定时、迁移页面权限、建唯一索引。
     _migrate_consolidate_task_analysis(engine)
 

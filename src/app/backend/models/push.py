@@ -74,11 +74,22 @@ class PushRun(Base):
     event_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     status: Mapped[str] = mapped_column(String(16), nullable=False)  # succeeded|failed|no_new
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # 邮件内容留存（push-email-preview-inline-figures）：成功发送的推送留存实际
+    # 渲染的邮件主题/HTML（浏览器可渲染，图表以 data: 内嵌）/附件清单，供推送历史预览。
+    # 未发送邮件的记录（no_new、发送前 failed）这三列为 NULL。
+    subject: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    email_html: Mapped[str | None] = mapped_column(Text, nullable=True)
+    attachment_summary: Mapped[list | None] = mapped_column(JSON, nullable=True)
     started_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     finished_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, index=True)
 
     rule: Mapped[PushRule | None] = relationship(back_populates="runs")
+
+    @property
+    def has_preview(self) -> bool:
+        """是否留存了可预览的邮件内容（push-email-preview-inline-figures）。"""
+        return self.email_html is not None
 
 
 class SmtpConfig(Base):

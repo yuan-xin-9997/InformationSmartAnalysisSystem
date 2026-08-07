@@ -1,8 +1,13 @@
-"""Collect email attachments (source file + figures) for push events.
+"""Collect email attachments (source file + figures) and inline figures for push.
 
 Reuses the file-serving path validation (``is_relative_to``) to prevent path
 traversal. Files exceeding the size limit or missing/outsider are skipped with
 a warning log; the push is never aborted because of an attachment.
+
+``collect_push_media`` reads each figure's bytes once and derives both an
+attachment (``Content-Disposition: attachment``) and an inline image
+(``Content-Disposition: inline`` + ``Content-ID``) from the same bytes, so the
+chart is both downloadable and visible inline in the HTML body.
 """
 from __future__ import annotations
 
@@ -40,6 +45,22 @@ class Attachment:
     data: bytes
 
 
+@dataclass
+class InlineImage:
+    """An inline image embedded in the HTML body via ``Content-ID`` (CID).
+
+    ``cid`` is referenced from the HTML as ``<img src="cid:{cid}">`` and matched
+    to a ``Content-ID`` MIME header by the email channel. Derived from the same
+    bytes as the corresponding figure ``Attachment``.
+    """
+
+    cid: str
+    filename: str
+    mime: str
+    data: bytes
+    item_id: int
+
+
 def _safe_filename(name: str, fallback: str) -> str:
     """Return a basename-only filename (defends against header injection)."""
     return Path(name or fallback).name or fallback
@@ -63,19 +84,25 @@ def _try_read(path: Path, filename: str, mime: str) -> Attachment | None:
         return None
 
 
-def collect_attachments(db, results: list[AnalysisResult]) -> list[Attachment]:
-    """Collect source-file + figure attachments for ``per_item`` results.
+def collect_push_media(
+    db, results: list[AnalysisResult]
+) -> tuple[list[Attachment], list[InlineImage]]:
+    """Collect attachments + inline figures for ``per_item`` results.
 
-    ``aggregate`` results (``info_item_id`` is None) contribute no attachments.
+    Returns ``(attachments, inline_figures)``. ``aggregate`` results
+    (``info_item_id`` is None) contribute no media. Each figure yields one
+    ``Attachment`` (downloadable) and one ``InlineImage`` (CID-embedded in the
+    HTML body), both from a single byte read.
     """
     atts: list[Attachment] = []
+    inline_figures: list[InlineImage] = []
     item_ids = {
         r.info_item_id
         for r in results
         if r.info_item_id and r.result_type == "per_item"
     }
     if not item_ids:
-        return atts
+        return atts, inline_figures
 
     items_map = {
         it.id: it
@@ -121,7 +148,7 @@ def collect_attachments(db, results: list[AnalysisResult]) -> list[Attachment]:
         if att:
             atts.append(att)
 
-    # 图表
+    # 图表：一次读取，同时产出附件 + 内联图（同源字节，分配唯一 CID）
     for f in figs:
         item = items_map.get(f.item_id)
         if not item:
@@ -132,8 +159,15 @@ def collect_attachments(db, results: list[AnalysisResult]) -> list[Attachment]:
             continue
         stem = Path(_safe_filename(item.title, "figure")).stem
         filename = f"{stem}_{f.figure_index}{fig_path.suffix.lower()}"
-        att = _try_read(fig_path, filename, f.mime or "application/octet-stream")
+        mime = f.mime or "application/octet-stream"
+        att = _try_read(fig_path, filename, mime)
         if att:
             atts.append(att)
+            cid = f"fig-{f.item_id}-{f.figure_index}@isas"
+            inline_figures.append(
+                InlineImage(
+                    cid=cid, filename=filename, mime=mime, data=att.data, item_id=f.item_id
+                )
+            )
 
-    return atts
+    return atts, inline_figures
