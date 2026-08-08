@@ -38,16 +38,16 @@
 
 ## 7. 前端（预览入口 + iframe 弹层）
 
-- [ ] 7.1 `api/push.ts` `PushRun` 类型增 `has_preview`/`attachment_summary`；新增 `getPushRunPreviewApi(taskId, runId)`
-- [ ] 7.2 `AnalysisTasks.vue` 推送历史卡片：`run.has_preview` 时显示「预览」按钮；点击调接口取 `{subject, html}`
-- [ ] 7.3 预览弹层：`<iframe :srcdoc="html" sandbox="allow-same-origin" referrerpolicy="no-referrer">` 渲染（含 `data:` 内嵌图）；弹层标题显示 `subject`
+- [x] 7.1 `api/push.ts` `PushRun` 类型增 `has_preview`/`attachment_summary`；新增 `getPushRunPreviewApi(taskId, runId)`
+- [x] 7.2 `AnalysisTasks.vue` 推送历史卡片：`run.has_preview` 时显示「预览」按钮；点击调接口取 `{subject, html}`
+- [x] 7.3 预览弹层：`<iframe :srcdoc="html" sandbox="allow-same-origin" referrerpolicy="no-referrer">` 渲染（含 `data:` 内嵌图）；弹层标题显示 `subject`
 - [ ] 7.4 手测：成功推送后历史出现「预览」，预览含内嵌图表；`no_new` 记录无「预览」按钮
 
 ## 8. 端到端与回归
 
 - [ ] 8.1 端到端：配置真实 SMTP，对含图表的 `per_item` 任务手动推送，验证邮件正文内嵌图表可见、图表同时为附件、推送历史可预览且预览含图
 - [ ] 8.2 回归：无图表任务推送正文无破损占位；`aggregate` 推送无图无附件；`website`/`freshrss` 源无原文件附件但有图内嵌
-- [ ] 8.3 全量单测通过（`pytest`），前端构建通过（`npm run build`）
+- [x] 8.3 全量单测通过（`pytest`），前端构建通过（`npm run build`）
 
 ## 9. 文档与部署
 
