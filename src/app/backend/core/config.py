@@ -74,7 +74,9 @@ class Settings:
         self.llm_temperature: float = float(
             _env("ISAS_LLM_TEMPERATURE", llm.get("temperature", 0.3))
         )
-        self.llm_max_tokens: int = int(_env("ISAS_LLM_MAX_TOKENS", llm.get("max_tokens", 2000)))
+        self.llm_max_tokens: int = int(
+            _env("ISAS_LLM_MAX_TOKENS", llm.get("max_tokens", 16000))
+        )
         self.llm_timeout: int = int(_env("ISAS_LLM_TIMEOUT", llm.get("timeout_seconds", 60)))
 
         fr = raw.get("freshrss", {})

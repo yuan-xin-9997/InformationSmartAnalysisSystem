@@ -62,7 +62,11 @@ class _FakeResp:
 
 @pytest.fixture
 def captured(monkeypatch):
-    """Capture ``httpx.post`` calls; ``captured['resp']`` controls the response."""
+    """Capture ``httpx.post`` calls; ``captured['resp']`` controls the response.
+
+    Set ``captured['resps']`` to a list to return a different response per call
+    (the last entry repeats once the list is exhausted).
+    """
     state: dict = {
         "posts": [],
         "resp": _FakeResp(payload={"choices": [{"message": {"content": "ok"}}]}),
@@ -72,16 +76,34 @@ def captured(monkeypatch):
         state["posts"].append(
             {"url": url, "json": json, "headers": headers, "timeout": timeout}
         )
+        resps = state.get("resps")
+        if resps:
+            idx = min(len(state["posts"]) - 1, len(resps) - 1)
+            return resps[idx]
         return state["resp"]
 
     monkeypatch.setattr(httpx, "post", _post)
     return state
 
 
-def _make_client():
+def _make_client(**kwargs):
     from app.backend.services.analysis.llm_client import LLMClient
 
-    return LLMClient(base_url="http://mock-llm", api_key="sk-mock", model="gpt-4o-mini")
+    opts = {
+        "base_url": "http://mock-llm",
+        "api_key": "sk-mock",
+        "model": "gpt-4o-mini",
+    }
+    opts.update(kwargs)
+    return LLMClient(**opts)
+
+
+def _choice(content=None, finish_reason=None, **message_extra):
+    """Build a ``choices[0]`` payload for a chat-completion response."""
+    message: dict = dict(message_extra)
+    if content is not None:
+        message["content"] = content
+    return {"choices": [{"finish_reason": finish_reason, "message": message}]}
 
 
 def test_chat_sends_text_messages_and_returns_content(captured):
@@ -183,3 +205,101 @@ def test_chat_with_images_retries_once_on_timeout(monkeypatch):
     monkeypatch.setattr(httpx, "post", _post)
     assert client.chat_with_images("s", "u", [b"x"]) == "ok"
     assert calls["n"] == 2
+
+
+# ---------- 输出有效性校验：空内容 / 截断 / max_tokens 下限 ----------
+#
+# 这些用例守护的线上故障：推理模型因 max_tokens 过小，思考阶段耗尽预算，
+# 返回空 content + finish_reason="length"；旧实现照原样返回空串，引擎据此
+# 把条目判为成功并推送，最终发出一封空正文邮件。
+
+
+def test_chat_empty_content_raises(captured):
+    """空 content 不得被当成有效结果返回。"""
+    from app.backend.services.analysis.llm_client import LLMError
+
+    captured["resp"] = _FakeResp(payload=_choice(content="", finish_reason="stop"))
+    client = _make_client()
+    with pytest.raises(LLMError, match="空内容"):
+        client.chat("sys", "u")
+
+
+def test_chat_whitespace_only_content_raises(captured):
+    from app.backend.services.analysis.llm_client import LLMError
+
+    captured["resp"] = _FakeResp(payload=_choice(content="  \n\t ", finish_reason="stop"))
+    client = _make_client()
+    with pytest.raises(LLMError, match="空内容"):
+        client.chat("sys", "u")
+
+
+def test_chat_missing_content_key_raises(captured):
+    """响应里没有 content 键（旧实现返回 None）同样判为失败。"""
+    from app.backend.services.analysis.llm_client import LLMError
+
+    captured["resp"] = _FakeResp(payload=_choice(finish_reason="stop"))
+    client = _make_client()
+    with pytest.raises(LLMError, match="空内容"):
+        client.chat("sys", "u")
+
+
+def test_chat_falls_back_to_reasoning_content(captured):
+    """部分推理模型把内容放在 reasoning_content，content 为空时应回退。"""
+    captured["resp"] = _FakeResp(
+        payload=_choice(content="", finish_reason="stop", reasoning_content="思考结果")
+    )
+    client = _make_client()
+    assert client.chat("sys", "u") == "思考结果"
+
+
+def test_chat_retries_truncated_with_doubled_max_tokens(captured):
+    """finish_reason=length -> 以翻倍 max_tokens 重试一次并返回结果。"""
+    captured["resps"] = [
+        _FakeResp(payload=_choice(content="半截", finish_reason="length")),
+        _FakeResp(payload=_choice(content="完整结果", finish_reason="stop")),
+    ]
+    client = _make_client(max_tokens=16000)
+    assert client.chat("sys", "u") == "完整结果"
+
+    posts = captured["posts"]
+    assert len(posts) == 2
+    assert posts[0]["json"]["max_tokens"] == 16000
+    assert posts[1]["json"]["max_tokens"] == 32000
+
+
+def test_chat_truncated_twice_raises_truncated_error(captured):
+    from app.backend.services.analysis.llm_client import LLMTruncatedError
+
+    captured["resp"] = _FakeResp(payload=_choice(content="还是半截", finish_reason="length"))
+    client = _make_client(max_tokens=8000)
+    with pytest.raises(LLMTruncatedError, match="截断"):
+        client.chat("sys", "u")
+    assert len(captured["posts"]) == 2  # 只重试一次，不无限循环
+
+
+def test_truncation_retry_is_capped(captured):
+    """翻倍重试不得超过 MAX_TOKENS_RETRY_CAP。"""
+    from app.backend.services.analysis.llm_client import MAX_TOKENS_RETRY_CAP
+
+    captured["resps"] = [
+        _FakeResp(payload=_choice(content="", finish_reason="length")),
+        _FakeResp(payload=_choice(content="ok", finish_reason="stop")),
+    ]
+    client = _make_client(max_tokens=20000)
+    assert client.chat("sys", "u") == "ok"
+    assert captured["posts"][1]["json"]["max_tokens"] == MAX_TOKENS_RETRY_CAP == 32000
+
+
+def test_max_tokens_below_floor_is_raised(captured):
+    """部署侧陈旧配置（2000）应被抬到安全下限，避免再次发出空正文邮件。"""
+    from app.backend.services.analysis.llm_client import MIN_MAX_TOKENS
+
+    client = _make_client(max_tokens=2000)
+    client.chat("sys", "u")
+    assert captured["posts"][-1]["json"]["max_tokens"] == MIN_MAX_TOKENS == 4096
+
+
+def test_max_tokens_above_floor_is_untouched(captured):
+    client = _make_client(max_tokens=16000)
+    client.chat("sys", "u")
+    assert captured["posts"][-1]["json"]["max_tokens"] == 16000

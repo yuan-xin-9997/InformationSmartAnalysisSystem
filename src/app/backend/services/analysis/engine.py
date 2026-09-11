@@ -33,6 +33,30 @@ def _make_llm(task_config: dict) -> LLMClient:
     return LLMClient(model=model)
 
 
+def _call_llm(
+    llm: LLMClient, system: str, user: str, db, run_id: int, label: str
+) -> str | None:
+    """调用 LLM；失败时记 WARNING 并返回 ``None``（不中断整批分析）。
+
+    ``LLMClient`` 已保证返回值非空且未被截断（截断会以翻倍预算重试一次），
+    这里再校验一次空内容是**纵深防御**：只要结果为空，就绝不能落库、绝不能
+    被判定为成功——否则会推送出一封空正文邮件。注入的 mock/第三方 client
+    同样受此约束。
+
+    单条失败不应让整批 50 条白跑：调用方按 ``None`` 跳过该条目——不落库、
+    不置 ``analyzed``、不推进水位线——并在运行摘要中计入失败数。
+    """
+    try:
+        content = llm.chat(system, user)
+    except LLMError as exc:
+        _log(db, run_id, "WARNING", f"[{label}] 分析失败，跳过该条目: {exc}")
+        return None
+    if not (content or "").strip():
+        _log(db, run_id, "WARNING", f"[{label}] 分析失败，跳过该条目: LLM 返回空内容")
+        return None
+    return content
+
+
 def run_analysis(
     run_id: int,
     task_id: int,
@@ -55,6 +79,10 @@ def run_analysis(
         run.started_at = utcnow()
         db.commit()
         _log(db, run_id, "INFO", f"开始分析任务: {task.name} (模式: {mode})")
+
+        # 仅当本次运行真正产出有效结果时才触发推送（见文件末尾的推送钩子）。
+        analysis_ok = False
+        failed_count = 0
 
         try:
             cfg: dict[str, Any] = task.config or {}
@@ -91,7 +119,12 @@ def run_analysis(
                     _log(db, run_id, "INFO", f"自定义模式：分析选中的 {len(items)} 条")
                 for it in items:
                     system, user = P.render_per_item(system_prompt, user_template, it)
-                    content = llm.chat(system, user)
+                    content = _call_llm(
+                        llm, system, user, db, run_id, f"条目#{it.id}"
+                    )
+                    if content is None:
+                        failed_count += 1
+                        continue
                     db.add(
                         AnalysisResult(
                             task_run_id=run_id,
@@ -136,24 +169,42 @@ def run_analysis(
 
                     if analysis_mode == "aggregate":
                         system, user = P.render_aggregate(system_prompt, user_template, items)
-                        content = llm.chat(system, user)
-                        db.add(
-                            AnalysisResult(
-                                task_run_id=run_id,
-                                task_id=task_id,
-                                source_id=ts.source_id,
-                                info_item_id=None,
-                                result_type="aggregate",
-                                content=content,
-                            )
+                        content = _call_llm(
+                            llm, system, user, db, run_id, f"源[{source.name}] 聚合"
                         )
-                        for it in items:
-                            it.analyzed = True
-                        total_results += 1
+                        if content is None:
+                            # 整批聚合失败：不落库、不置 analyzed、不推进水位线
+                            failed_count += len(items)
+                        else:
+                            db.add(
+                                AnalysisResult(
+                                    task_run_id=run_id,
+                                    task_id=task_id,
+                                    source_id=ts.source_id,
+                                    info_item_id=None,
+                                    result_type="aggregate",
+                                    content=content,
+                                )
+                            )
+                            for it in items:
+                                it.analyzed = True
+                            total_results += 1
+                            ts.last_analyzed_item_id = max(it.id for it in items)
+                            ts.last_analyzed_at = utcnow()
                     else:
+                        # 水位线只推进到本批**成功**条目的最大 id：失败条目（尤其是
+                        # 集中在批次尾部时）下次增量会自动重跑。失败若夹在中间，
+                        # 该条目会被水位线越过，需用「全量」或「自定义」模式补跑——
+                        # 故 _call_llm 的 WARNING 会写明条目 id 供人工排查。
+                        ok_ids: list[int] = []
                         for it in items:
                             system, user = P.render_per_item(system_prompt, user_template, it)
-                            content = llm.chat(system, user)
+                            content = _call_llm(
+                                llm, system, user, db, run_id, f"条目#{it.id}"
+                            )
+                            if content is None:
+                                failed_count += 1
+                                continue
                             db.add(
                                 AnalysisResult(
                                     task_run_id=run_id,
@@ -165,20 +216,30 @@ def run_analysis(
                                 )
                             )
                             it.analyzed = True
+                            ok_ids.append(it.id)
                             total_results += 1
+                        if ok_ids:
+                            ts.last_analyzed_item_id = max(ok_ids)
+                            ts.last_analyzed_at = utcnow()
 
-                    ts.last_analyzed_item_id = max(it.id for it in items)
-                    ts.last_analyzed_at = utcnow()
                     total_items += len(items)
 
-            run.status = "succeeded"
             run.finished_at = utcnow()
             run.summary = f"分析完成: 处理 {total_items} 条信息, 生成 {total_results} 条结果"
+            if failed_count:
+                run.summary += f", 失败 {failed_count} 条 (详见任务日志 WARNING)"
+            # 全部条目都失败时不得记为成功——否则会触发推送发出一封空正文邮件。
+            if failed_count and total_results == 0:
+                run.status = "failed"
+                run.error = f"全部 {failed_count} 条分析失败，未产生任何结果"
+            else:
+                run.status = "succeeded"
+                analysis_ok = True
             _log(db, run_id, "INFO", run.summary)
             if run.scheduled_job_id:
                 sj = db.get(ScheduledJob, run.scheduled_job_id)
                 if sj:
-                    sj.last_run_status = "succeeded"
+                    sj.last_run_status = run.status
             db.commit()
         except Exception as exc:  # noqa: BLE001
             _logger.exception("分析任务失败: %s", task.name)
@@ -192,5 +253,9 @@ def run_analysis(
                     sj.last_run_status = "failed"
             db.commit()
         else:
-            # 推送钩子：分析成功后触发 on_run 推送（异常隔离，不影响已成功的分析）
-            on_analysis_completed(task_id)
+            # 推送钩子：**仅当运行状态为 succeeded** 时才触发 on_run 推送。
+            # 不能只判断「未抛异常」——全部条目分析失败时状态为 failed 但不抛异常，
+            # 那样仍会推送出一封空正文邮件（本次故障的直接原因）。异常隔离：
+            # on_analysis_completed 自身吞掉错误，不影响已成功的分析结果。
+            if analysis_ok:
+                on_analysis_completed(task_id)

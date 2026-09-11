@@ -17,6 +17,17 @@
 
 > 数据模型变更：推送规则由多任务（`task_ids` 数组）改为单任务 1:1（`task_id`）；定时任务收敛为每任务 1:1。详见下文「部署·三页合一迁移」。
 
+## 分析输出校验与逐条容错
+
+LLM 返回的分析输出在**判定为成功之前**会经过校验，杜绝「空结果被当成成功」：
+
+- **非空校验**：`content` 去除首尾空白后为空即判失败。若模型把正文放在 `reasoning_content` 字段（部分推理模型的习惯），自动回退使用该字段并记 WARNING。
+- **截断检测与自愈**：`finish_reason == "length"` 表示输出被长度上限截断——系统以**翻倍的 `max_tokens`**（上限 32000）自动重试一次；重试后仍截断则判该条失败。
+- **安全下限**：`llm.max_tokens` 低于 4096 时按 4096 生效并记 WARNING，避免陈旧的部署配置造成空输出。
+- **逐条容错**：单条分析失败只跳过该条（不落库、不置「已分析」、不推进水位线），其余条目继续；任务日志记录含条目 ID 的 WARNING，运行摘要标注失败数量。
+- **全部失败即失败**：本次运行未产出任何有效结果时，运行状态为 `failed` 且**不触发推送**——推送严格以运行状态为 `succeeded` 为前提。
+- **水位线语义**：`sequential` 增量模式下水位线只推进到本批**成功**条目的最大 ID，因此失败集中在批次尾部时下次增量会自动重跑；失败若夹在中间会被水位线越过，需用「全量」或「自定义」模式补跑。
+
 ## 分析结果页
 
 分析任务列表的「结果」按钮打开任务结果详情页（路径 `/analysis-tasks/:id/results`），按运行批次分组，采用三段式呈现：
@@ -102,6 +113,7 @@
 | 配置项 | 默认值 | 环境变量 | 说明 |
 |---|---|---|---|
 | `figures_dir` | `data/figures`（即 `data_dir/figures`） | `ISAS_FIGURES_DIR` | 内嵌图表落盘根目录，启动时自动创建 |
+| `llm.max_tokens` | `16000` | `ISAS_LLM_MAX_TOKENS` | 单次分析的最大输出长度预算。**推理模型需覆盖「思考 + 回答」两部分**，设置过小会导致思考阶段耗尽预算、返回空正文（曾因此发出空正文邮件）。代码内置安全下限 4096：配置低于下限时按 4096 生效并记 WARNING |
 | `max_figures_per_item` | `20` | `ISAS_MAX_FIGURES_PER_ITEM` | 单文件图表抽取上限，超出截断并记日志 |
 | `ocr.base_url` | `http://192.168.0.100:11980` | `ISAS_OCR_BASE_URL` | NAS 本地 OCR 服务地址（`POST /v1/ocr`，`glm-ocr`） |
 | `ocr.api_key` | （部署时填写） | `ISAS_OCR_API_KEY` | OCR 服务 Bearer 鉴权密钥 |
@@ -121,6 +133,24 @@
 | `extraction.render_dpi` | `150` | `ISAS_EXTRACTION_RENDER_DPI` | OCR 兜底页面渲染 DPI（清晰度与调用成本平衡） |
 
 ## 部署
+
+### 升级后需手工同步 `llm.max_tokens`
+
+Jenkins 部署脚本用 `src/JenkinsConfig/merge_app_config.py` 增量合并 `config/app.json`：**只补齐仓库新增的键，保留部署侧既有值**（避免覆盖运维改过的配置）。因此仓库里把 `llm.max_tokens` 默认值调大**不会**改动已部署实例上的旧值。
+
+升级到本版本后，请把部署侧 `config/app.json` 的 `llm.max_tokens` 同步为 `16000`（或在 systemd 单元/启动脚本中设置 `ISAS_LLM_MAX_TOKENS=16000`），然后重启：
+
+```bash
+python3 - <<'PY'
+import json, pathlib
+p = pathlib.Path("config/app.json")          # 部署目录下的 app.json
+cfg = json.loads(p.read_text(encoding="utf-8"))
+cfg.setdefault("llm", {})["max_tokens"] = 16000
+p.write_text(json.dumps(cfg, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+PY
+```
+
+**不改也不会再发出空正文邮件**——代码内置的 4096 安全下限会兜底（截断时还会自动重试到 8192），只是分析长文时更易触发截断重试、单次调用成本更高。
 
 ### 三页合一迁移
 
