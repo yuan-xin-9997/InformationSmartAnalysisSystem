@@ -42,6 +42,13 @@
 
 ## 6. 交付
 
-- [ ] 6.1 提交并推送到 GitHub `main` 分支
-- [ ] 6.2 触发 Jenkins 手工构建完成部署
-- [ ] 6.3 部署后把部署侧 `config/app.json` 的 `llm.max_tokens` 同步为 16000（或设 `ISAS_LLM_MAX_TOKENS=16000`）并重启
+- [x] 6.1 提交并推送到 GitHub `main` 分支（`738a14b`）
+- [x] 6.2 触发 Jenkins 手工构建完成部署（构建 #56，部署成功，健康检查 OK）
+- [x] 6.3 部署后把部署侧 `config/app.json` 的 `llm.max_tokens` 同步为 16000（或设 `ISAS_LLM_MAX_TOKENS=16000`）并重启
+
+  2026-09-11 执行（用户授权后）：
+
+  - 先确认 `config/env.local` 只设了 `ISAS_LLM_BASE_URL/API_KEY/MODEL/TIMEOUT`，**未设** `ISAS_LLM_MAX_TOKENS`，故该值由 `app.json` 决定。
+  - 备份 `config/app.json` 到部署目录**之外**（`/opt/InformationSmartAnalysisSystem-config-backups/app.json.20260911-215321`）——部署目录内会被下次 `rsync --delete` 清掉。
+  - `llm.max_tokens` 2000 → 16000，`stop.sh` + `start.sh` 重启。
+  - 验证：PID 1067549 → 1076927（配置已重载），`/api/health` 返回 `{"status":"ok"}`；新 SSH 会话复查进程存活正常；部署侧配置层实测 `llm_max_tokens = 16000`。
