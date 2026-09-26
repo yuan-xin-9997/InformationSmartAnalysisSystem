@@ -197,6 +197,6 @@ src
 
 - Micron Newsroom：`https://www.micron.com/about/press/news`，文章链接规则 `a[href*="/about/press/news/"]`（已确认栏目页 200 且存在文章链接）。
 - Kioxia News：`https://www.kioxia.com/en-jp/news.html`，文章链接规则 `a[href*="/en-jp/about/news/"]`（已确认栏目页 200 且存在文章链接）。
-- Blocks & Files：`https://www.blocksandfiles.com/flash/`，文章链接规则 `a[href*="/flash/20"]`（已确认栏目页 200，具体新闻文章链接）。
+- Blocks & Files：`https://www.blocksandfiles.com/flash/`，文章链接规则 `a[href*="/flash/20"]`（公开页面可见文章链接；当前集中抓取服务收到无链接的拦截页，暂不能入库）。
 - JEDEC：候选公告栏目 `https://www.jedec.org/news/pressreleases`；当前网络实测返回 403，不能确认页面链接结构。可在允许访问的网络中使用 `browser` 模式检查，确认后填入实际文章链接选择器；若仍 403，应使用其公开 RSS 或获得站点许可。
 - SNIA：候选新闻栏目 `https://www.snia.org/news-events/news`；当前网络实测返回 403，不能确认页面链接结构。可在允许访问的网络中使用 `browser` 模式检查，确认后填入实际文章链接选择器；若仍 403，应使用其公开 RSS 或获得站点许可。

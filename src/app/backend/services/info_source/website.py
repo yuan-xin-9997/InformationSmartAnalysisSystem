@@ -45,7 +45,10 @@ class WebsiteAdapter(InfoSourceAdapter):
     def check_status(self) -> SourceStatus:
         try:
             html = self._client.fetch_html(self.url, mode=self.mode)
-            return SourceStatus(ok=True, message=f"抓取成功，HTML {len(html)} 字节")
+            links = BeautifulSoup(html, "lxml").select(self.link_selector)
+            if not any(a.get("href") for a in links):
+                return SourceStatus(ok=False, message="栏目页未找到文章链接；可能为拦截页面或链接选择器不匹配")
+            return SourceStatus(ok=True, message=f"抓取成功，找到 {len(links)} 个候选链接")
         except WebFetchError as exc:
             return SourceStatus(ok=False, message=str(exc))
 
@@ -63,10 +66,12 @@ class WebsiteAdapter(InfoSourceAdapter):
 
         links: list[tuple[str, str]] = []
         seen: set[str] = set()
+        candidate_count = 0
         for a in soup.select(self.link_selector):
             href = a.get("href")
             if not href or href.startswith("#"):
                 continue
+            candidate_count += 1
             abs_url = normalize_url(urljoin(self.base_url, href))
             if abs_url in seen or abs_url in known:
                 continue
@@ -74,6 +79,9 @@ class WebsiteAdapter(InfoSourceAdapter):
             links.append((abs_url, a.get_text(strip=True) or abs_url))
             if len(links) >= self.max_items:
                 break
+
+        if not candidate_count:
+            raise WebFetchError("栏目页未找到文章链接；可能为拦截页面或链接选择器不匹配")
 
         items: list[InfoItemData] = []
         for abs_url, fallback_title in links:

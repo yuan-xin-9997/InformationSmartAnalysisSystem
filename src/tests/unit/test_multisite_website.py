@@ -52,3 +52,14 @@ def test_legacy_source_api(client, admin_headers, sync_worker, monkeypatch):
     source = client.get(f'/api/info-sources/{sid}', headers=admin_headers).json()
     assert source['item_count'] == 1
     assert source['site_status']['https://legacy.example/news']['status'] == 'ok'
+
+
+def test_listing_without_article_links_is_failure(monkeypatch):
+    from app.backend.services.info_source.website import WebsiteAdapter
+    from app.backend.services.info_source.webfetch_client import WebFetchClient, WebFetchError
+    monkeypatch.setattr(WebFetchClient, 'fetch_html', lambda self, url, mode='auto': '<html>Access denied</html>')
+    adapter = WebsiteAdapter({'url': 'https://example.com/news', 'link_selector': 'a.article'})
+    assert adapter.check_status().ok is False
+    import pytest
+    with pytest.raises(WebFetchError):
+        adapter.fetch_new_items()
