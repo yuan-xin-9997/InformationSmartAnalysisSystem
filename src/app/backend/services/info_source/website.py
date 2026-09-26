@@ -2,12 +2,27 @@
 from __future__ import annotations
 
 from datetime import datetime
-from urllib.parse import urljoin
+from urllib.parse import urljoin, urlsplit, urlunsplit, parse_qsl, urlencode
 
 from bs4 import BeautifulSoup
 
 from .base import InfoItemData, InfoSourceAdapter, SourceStatus
 from .webfetch_client import WebFetchClient, WebFetchError
+
+
+def normalize_url(url: str) -> str:
+    """Canonical article identity, stripping fragments and tracking parameters."""
+    parts = urlsplit(url)
+    query = urlencode(sorted((k, v) for k, v in parse_qsl(parts.query, keep_blank_values=True)
+                           if not k.lower().startswith("utm_") and k.lower() not in {"fbclid", "gclid"}))
+    return urlunsplit((parts.scheme.lower(), parts.netloc.lower(), parts.path.rstrip("/") or "/", query, ""))
+
+
+def website_sites(config: dict) -> list[dict]:
+    if isinstance(config.get("sites"), list):
+        return config["sites"]
+    return [{"name": config.get("name") or urlsplit(config["url"]).netloc,
+             **config}]
 
 
 class WebsiteAdapter(InfoSourceAdapter):
@@ -52,7 +67,7 @@ class WebsiteAdapter(InfoSourceAdapter):
             href = a.get("href")
             if not href or href.startswith("#"):
                 continue
-            abs_url = urljoin(self.base_url, href)
+            abs_url = normalize_url(urljoin(self.base_url, href))
             if abs_url in seen or abs_url in known:
                 continue
             seen.add(abs_url)

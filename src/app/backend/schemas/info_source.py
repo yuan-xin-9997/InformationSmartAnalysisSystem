@@ -18,6 +18,7 @@ class InfoSourceOut(ORMBase):
     last_sync_at: BeijingDatetime | None
     last_error: str | None
     item_count: int
+    site_status: dict = {}
     created_at: BeijingDatetime
     updated_at: BeijingDatetime
 
@@ -44,6 +45,8 @@ class InfoItemBrief(ORMBase):
     title: str
     url: str | None
     published_at: BeijingDatetime | None
+    site_name: str | None = None
+    site_url: str | None = None
     fetched_at: BeijingDatetime
     analyzed: bool
     created_at: BeijingDatetime

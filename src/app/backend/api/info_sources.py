@@ -28,6 +28,7 @@ from ..services import worker
 from ..services.info_source import get_adapter, validate_config
 from ..services.info_source.factory import type_specs
 from ..services.info_source.sync import reextract_item, run_sync
+from ..services.info_source.website import website_sites
 
 router = APIRouter(prefix="/api/info-sources", tags=["信息源管理"])
 
@@ -186,6 +187,20 @@ def check_source(
     if src is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="信息源不存在")
     try:
+        if src.type == "website":
+            states = {}
+            for site in website_sites(src.config or {}):
+                try:
+                    result = get_adapter("website", site).check_status()
+                    states[site["url"]] = {"name": site["name"], "last_sync_at": (src.site_status or {}).get(site["url"], {}).get("last_sync_at"), "last_check_at": __import__("datetime").datetime.now(__import__("datetime").timezone.utc).isoformat(), "status": "ok" if result.ok else "error", "error": None if result.ok else result.message, "item_count": (src.site_status or {}).get(site["url"], {}).get("item_count", 0)}
+                except Exception as exc:
+                    states[site["url"]] = {"name": site["name"], "status": "error", "error": str(exc), "item_count": 0}
+            src.site_status = states
+            failed = [v for v in states.values() if v["status"] == "error"]
+            src.status = "warning" if failed and len(failed) < len(states) else "error" if failed else "ok"
+            src.last_error = "; ".join(f"{v['name']}: {v['error']}" for v in failed) or None
+            db.commit()
+            return SourceStatusOut(status=src.status, message=src.last_error or "检查完成", item_count=src.item_count, last_sync_at=src.last_sync_at)
         adapter = get_adapter(src.type, src.config or {})
         result = adapter.check_status()
         src.status = "ok" if result.ok else "error"
@@ -230,11 +245,14 @@ def sync_source(
 def count_items(
     source_id: int,
     analyzed: bool | None = Query(None, description="true=已分析,false=未分析,省略=全部"),
+    site_url: str | None = None,
     _: User = Depends(require_page("info_sources")),
     db: Session = Depends(get_db),
 ):
     """返回条目计数（供分页）。total 为按 analyzed 过滤后的数；all/analyzed/unanalyzed 为整体统计。"""
     base = db.query(InfoItem).filter(InfoItem.source_id == source_id)
+    if site_url:
+        base = base.filter(InfoItem.site_url == site_url)
     all_count = base.count()
     analyzed_count = base.filter(InfoItem.analyzed.is_(True)).count()
     unanalyzed_count = base.filter(InfoItem.analyzed.is_(False)).count()
@@ -255,6 +273,7 @@ def count_items(
 @router.get("/{source_id}/items", response_model=list[InfoItemBrief])
 def list_items(
     source_id: int,
+    site_url: str | None = None,
     limit: int = Query(50, ge=1, le=500),
     offset: int = Query(0, ge=0),
     analyzed: bool | None = Query(None, description="true=已分析,false=未分析,省略=全部"),
@@ -262,6 +281,8 @@ def list_items(
     db: Session = Depends(get_db),
 ):
     q = select(InfoItem).where(InfoItem.source_id == source_id)
+    if site_url:
+        q = q.where(InfoItem.site_url == site_url)
     if analyzed is not None:
         q = q.where(InfoItem.analyzed == analyzed)
     q = q.order_by(InfoItem.id.desc()).limit(limit).offset(offset)

@@ -20,6 +20,12 @@
             <span :class="['pill', s.status]">{{ typeLabel(s.type) }} · {{ s.status }}</span>
           </div>
           <p>{{ describe(s) }}</p>
+          <div v-if="s.type === 'website' && s.site_status" class="meta" style="display:block">
+            <div v-for="(state, url) in s.site_status" :key="url">
+              {{ state.name }} · {{ state.status }} · {{ state.item_count }} 条 · {{ state.last_sync_at || '未同步' }}
+              <span v-if="state.error" class="error">{{ state.error }}</span>
+            </div>
+          </div>
           <div class="meta">
             <span>{{ s.item_count }} 条</span>
             <span>同步于 {{ s.last_sync_at || '从未' }}</span>
@@ -53,7 +59,20 @@
             <input :value="requiredHint" disabled style="background:#f2f5fa" />
           </label>
         </div>
-        <label>配置（JSON）
+        <div v-if="form.type === 'website'">
+          <h3>网站来源</h3>
+          <div v-for="(site, index) in sites" :key="index" class="form-grid" style="margin-bottom:12px">
+            <label>来源名称<input v-model.trim="site.name" required /></label>
+            <label>资讯栏目 URL<input v-model.trim="site.url" type="url" required /></label>
+            <label>链接选择器<input v-model.trim="site.link_selector" placeholder="a" /></label>
+            <label>正文选择器<input v-model.trim="site.content_selector" placeholder="article, main, body" /></label>
+            <label>抓取模式<select v-model="site.mode"><option value="auto">auto</option><option value="http">http</option><option value="browser">browser</option></select></label>
+            <label>条目上限<input v-model.number="site.max_items" type="number" min="1" max="500" /></label>
+            <button type="button" @click="sites.splice(index, 1)">删除网站</button>
+          </div>
+          <button type="button" @click="addSite">＋ 添加网站</button>
+        </div>
+        <label v-else>配置（JSON）
           <textarea v-model="configText" rows="9" placeholder="请输入 JSON 配置"></textarea>
         </label>
         <div class="modal-actions">
@@ -75,6 +94,10 @@
             <span>条（共 {{ counts.all }}｜已分析 {{ counts.analyzed }} / 未分析 {{ counts.unanalyzed }}）</span>
           </div>
           <div class="button-row">
+            <select v-if="currentSource?.type === 'website'" v-model="siteFilter" style="width:auto" @change="onFilterChange">
+              <option value="">全部网站</option>
+              <option v-for="site in currentSites" :key="site.url" :value="site.url">{{ site.name }}</option>
+            </select>
             <select v-model="filter" style="width:auto" @change="onFilterChange">
               <option value="">全部</option>
               <option value="analyzed">已分析</option>
@@ -89,10 +112,11 @@
         </div>
         <div v-if="!items.length" class="empty compact">无符合条件的条目</div>
         <table v-else>
-          <thead><tr><th>标题</th><th>已分析</th><th>发布时间</th></tr></thead>
+          <thead><tr><th>标题</th><th>网站来源</th><th>已分析</th><th>发布时间</th></tr></thead>
           <tbody>
             <tr v-for="it in items" :key="it.id">
               <td>{{ it.title || '(无标题)' }}</td>
+              <td>{{ it.site_name || '-' }}</td>
               <td><span :class="['pill', it.analyzed ? 'ok' : '']">{{ it.analyzed ? '是' : '否' }}</span></td>
               <td>{{ it.published_at || '-' }}</td>
             </tr>
@@ -111,7 +135,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { showToast } from '@/composables/toast'
 import {
   listSourcesApi, createSourceApi, updateSourceApi, deleteSourceApi,
@@ -125,6 +149,15 @@ const dialogVisible = ref(false)
 const editing = ref<InfoSource | null>(null)
 const form = reactive({ name: '', type: 'local_folder' })
 const configText = ref('{\n  "folder_path": ""\n}')
+type WebsiteSite = { name: string; url: string; link_selector: string; content_selector: string; mode: string; max_items: number }
+const sites = ref<WebsiteSite[]>([])
+const siteFilter = ref('')
+const currentSites = computed(() => currentSource.value ? readSites(currentSource.value.config) : [])
+function readSites(config: Record<string, unknown>): WebsiteSite[] {
+  const raw = Array.isArray(config.sites) ? config.sites : config.url ? [{ ...config, name: config.name || new URL(String(config.url)).hostname }] : []
+  return raw.map((s: Record<string, unknown>) => ({ name: String(s.name || ''), url: String(s.url || ''), link_selector: String(s.link_selector || ''), content_selector: String(s.content_selector || ''), mode: String(s.mode || 'auto'), max_items: Number(s.max_items || 20) }))
+}
+function addSite() { sites.value.push({ name: '', url: '', link_selector: '', content_selector: '', mode: 'auto', max_items: 20 }) }
 const itemsVisible = ref(false)
 const currentSource = ref<InfoSource | null>(null)
 const items = ref<InfoItemBrief[]>([])
@@ -132,6 +165,10 @@ const page = ref(1)
 const pageSize = ref(50)
 const filter = ref<'' | 'analyzed' | 'unanalyzed'>('')
 const counts = ref({ total: 0, all: 0, analyzed: 0, unanalyzed: 0 })
+
+watch(() => form.type, (type) => {
+  if (type === 'website' && !sites.value.length) addSite()
+})
 
 const requiredHint = computed(() => {
   const spec = typeSpecs.value.find((t) => t.type === form.type)
@@ -155,7 +192,7 @@ function typeIcon(t: string) {
 }
 function describe(s: InfoSource) {
   const c = s.config || {}
-  if (s.type === 'website') return String(c.url || '')
+  if (s.type === 'website') return readSites(c).map(site => site.name).join('、')
   if (s.type === 'local_folder') return String(c.folder_path || '')
   if (s.type === 'freshrss') return String(c.base_url || '')
   return ''
@@ -166,6 +203,7 @@ function openCreate() {
   form.name = ''
   form.type = 'local_folder'
   configText.value = '{\n  "folder_path": ""\n}'
+  sites.value = []
   dialogVisible.value = true
 }
 function openEdit(s: InfoSource) {
@@ -173,13 +211,14 @@ function openEdit(s: InfoSource) {
   form.name = s.name
   form.type = s.type
   configText.value = JSON.stringify(s.config, null, 2)
+  sites.value = s.type === 'website' ? readSites(s.config) : []
   dialogVisible.value = true
 }
 
 async function onSave() {
   let config: Record<string, unknown>
   try {
-    config = JSON.parse(configText.value)
+    config = form.type === 'website' ? { sites: sites.value.map(site => ({ ...site })) } : JSON.parse(configText.value)
   } catch {
     showToast('配置不是合法的 JSON')
     return
@@ -232,8 +271,8 @@ async function loadItems() {
   const a = analyzedParam()
   const offset = (page.value - 1) * pageSize.value
   ;[items.value, counts.value] = await Promise.all([
-    listItemsApi(currentSource.value.id, pageSize.value, offset, a),
-    countItemsApi(currentSource.value.id, a),
+    listItemsApi(currentSource.value.id, pageSize.value, offset, a, siteFilter.value || undefined),
+    countItemsApi(currentSource.value.id, a, siteFilter.value || undefined),
   ])
 }
 
@@ -242,6 +281,7 @@ async function openItems(s: InfoSource) {
   page.value = 1
   pageSize.value = 50
   filter.value = ''
+  siteFilter.value = ''
   await loadItems()
   itemsVisible.value = true
 }

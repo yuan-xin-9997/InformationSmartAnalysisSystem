@@ -63,7 +63,8 @@
 
 ### 信息源配置示例
 
-- 官方网站：`{"url":"https://example.com/news","link_selector":"a.news","content_selector":"article","mode":"auto","max_items":20}`
+- 官方网站（兼容单站点）：`{"url":"https://example.com/news","link_selector":"a.news","content_selector":"article","mode":"auto","max_items":20}`
+- 多网站官方网站：`{"sites":[{"name":"Micron Newsroom","url":"https://www.micron.com/about/press/news","link_selector":"a[href*=\"/about/press/news/\"]","content_selector":"article","mode":"auto","max_items":20}]}`。每个网站可独立配置 `name`、资讯栏目 `url`、`link_selector`、`content_selector`、`mode` 和 `max_items`。旧 `config.url` 自动按单站点处理，无需迁移。同步逐站隔离失败；信息源详情返回 `site_status`，条目返回 `site_name`、`site_url`。`GET /api/info-sources/{id}/items` 和 `/items/count` 支持 `site_url` 筛选。
 - 本地文件夹：`{"folder_path":"/abs/path","patterns":["*.txt","*.md","*.pdf","*.docx","*.html"],"recursive":true,"max_items":100000}`
 - FreshRSS：`{"base_url":"http://freshrss.example.com","user":"admin","api_token":"<API Token>","stream":"user/-/state/com.google/reading-list","mark_as_read":false,"max_items":50}`
 
@@ -191,3 +192,11 @@ src
 ├── start.ps1 / start.sh / stop.* / status.*
 └── README.md
 ```
+
+### IC 存储行业资讯站点配置说明
+
+- Micron Newsroom：`https://www.micron.com/about/press/news`，文章链接规则 `a[href*="/about/press/news/"]`（已确认栏目页 200 且存在文章链接）。
+- Kioxia News：`https://www.kioxia.com/en-jp/news.html`，文章链接规则 `a[href*="/en-jp/about/news/"]`（已确认栏目页 200 且存在文章链接）。
+- Blocks & Files：`https://www.blocksandfiles.com/flash/`，文章链接规则 `a[href*="/flash/20"]`（已确认栏目页 200，具体新闻文章链接）。
+- JEDEC：候选公告栏目 `https://www.jedec.org/news/pressreleases`；当前网络实测返回 403，不能确认页面链接结构。可在允许访问的网络中使用 `browser` 模式检查，确认后填入实际文章链接选择器；若仍 403，应使用其公开 RSS 或获得站点许可。
+- SNIA：候选新闻栏目 `https://www.snia.org/news-events/news`；当前网络实测返回 403，不能确认页面链接结构。可在允许访问的网络中使用 `browser` 模式检查，确认后填入实际文章链接选择器；若仍 403，应使用其公开 RSS 或获得站点许可。

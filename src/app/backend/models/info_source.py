@@ -26,6 +26,8 @@ class InfoSource(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
 
+    site_status: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+
     items: Mapped[list["InfoItem"]] = relationship(
         back_populates="source", cascade="all, delete-orphan"
     )
@@ -45,6 +47,8 @@ class InfoItem(Base):
     title: Mapped[str] = mapped_column(String(512), nullable=False, default="")
     url: Mapped[str | None] = mapped_column(String(1024), nullable=True)
     content: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    site_name: Mapped[str | None] = mapped_column(String(128), nullable=True, index=True)
+    site_url: Mapped[str | None] = mapped_column(String(1024), nullable=True)
     content_hash: Mapped[str] = mapped_column(String(64), nullable=False, default="", index=True)
     published_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, index=True)
     fetched_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)

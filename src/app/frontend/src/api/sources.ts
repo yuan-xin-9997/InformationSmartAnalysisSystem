@@ -9,6 +9,7 @@ export interface InfoSource {
   last_sync_at: string | null
   last_error: string | null
   item_count: number
+  site_status: Record<string, { name: string; status: string; error: string | null; last_sync_at: string | null; item_count: number }>
   created_at: string
   updated_at: string
 }
@@ -32,6 +33,8 @@ export interface InfoItemBrief {
   title: string
   url: string | null
   published_at: string | null
+  site_name: string | null
+  site_url: string | null
   fetched_at: string
   analyzed: boolean
   created_at: string
@@ -52,15 +55,16 @@ export const deleteSourceApi = (id: number) => request.delete<unknown, unknown>(
 export const checkSourceApi = (id: number) => request.post<unknown, SourceStatus>(`/api/info-sources/${id}/check`)
 export const syncSourceApi = (id: number) => request.post<unknown, { run_id: number; status: string }>(`/api/info-sources/${id}/sync`)
 export const getSourceStatusApi = (id: number) => request.get<unknown, SourceStatus>(`/api/info-sources/${id}/status`)
-export const listItemsApi = (id: number, limit = 50, offset = 0, analyzed?: boolean) =>
-  request.get<unknown, InfoItemBrief[]>(`/api/info-sources/${id}/items`, { params: { limit, offset, analyzed } })
+export const listItemsApi = (id: number, limit = 50, offset = 0, analyzed?: boolean, site_url?: string) =>
+  request.get<unknown, InfoItemBrief[]>(`/api/info-sources/${id}/items`, { params: { limit, offset, analyzed, site_url } })
 export const countItemsApi = (
   id: number,
   analyzed?: boolean,
+  site_url?: string,
 ) =>
   request.get<unknown, { total: number; all: number; analyzed: number; unanalyzed: number }>(
     `/api/info-sources/${id}/items/count`,
-    { params: { analyzed } },
+    { params: { analyzed, site_url } },
   )
 export const getItemApi = (sourceId: number, itemId: number) =>
   request.get<unknown, InfoItem>(`/api/info-sources/${sourceId}/items/${itemId}`)

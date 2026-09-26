@@ -19,6 +19,7 @@ from ...models.info_source import InfoItem, InfoItemFigure, InfoSource
 from ...models.task import TaskLog, TaskRun
 from .base import FigureData
 from .factory import get_adapter
+from .website import website_sites, normalize_url
 
 _logger = get_logger("sync")
 
@@ -110,7 +111,7 @@ def run_sync(run_id: int, source_id: int) -> None:
         _log(db, run_id, "INFO", f"开始同步信息源: {source.name} ({source.type})")
 
         try:
-            adapter = get_adapter(source.type, source.config or {})
+            adapter = get_adapter(source.type, (source.config or {}).get("sites", [source.config])[0] if source.type == "website" else source.config or {})
             # 批量加载已存在条目 (external_id -> content_hash)，供增量回补与去重，
             # 避免逐条 N+1 查询（6000 文件时性能差距显著）。
             existing: dict[str, str] = {
@@ -119,10 +120,28 @@ def run_sync(run_id: int, source_id: int) -> None:
                 .filter(InfoItem.source_id == source_id)
                 .all()
             }
-            items = adapter.fetch_new_items(
-                since=source.last_sync_at,
-                known_ids=set(existing.keys()),
-            )
+            site_results = {}
+            items = []
+            if source.type == "website":
+                for site in website_sites(source.config or {}):
+                    site_url = site["url"]
+                    try:
+                        site_adapter = get_adapter("website", site)
+                        fetched = site_adapter.fetch_new_items(known_ids=set(existing) | {it.external_id for it in items})
+                        for it in fetched:
+                            it.external_id = normalize_url(it.external_id)
+                            it.extra["site_name"] = site["name"]
+                            it.extra["site_url"] = site_url
+                        items.extend(fetched)
+                        site_results[site_url] = {"name": site["name"], "last_sync_at": utcnow().isoformat(), "status": "ok", "error": None, "item_count": len(fetched)}
+                    except Exception as exc:  # one site must not abort the rest
+                        site_results[site_url] = {"name": site["name"], "last_sync_at": utcnow().isoformat(), "status": "error", "error": str(exc), "item_count": 0}
+                        _log(db, run_id, "ERROR", f"网站 {site['name']} 同步失败: {exc}")
+            else:
+                items = adapter.fetch_new_items(
+                    since=source.last_sync_at,
+                    known_ids=set(existing.keys()),
+                )
             new_count = 0
             updated_count = 0
             now = utcnow()
@@ -136,6 +155,8 @@ def run_sync(run_id: int, source_id: int) -> None:
                         url=it.url,
                         content=it.content,
                         content_hash=ch,
+                        site_name=it.extra.get("site_name"),
+                        site_url=it.extra.get("site_url"),
                         published_at=it.published_at,
                         fetched_at=now,
                     )
@@ -155,6 +176,8 @@ def run_sync(run_id: int, source_id: int) -> None:
                     ).first()
                     if existing_item is None:
                         continue
+                    existing_item.site_name = it.extra.get("site_name") or existing_item.site_name
+                    existing_item.site_url = it.extra.get("site_url") or existing_item.site_url
                     existing_item.title = it.title
                     existing_item.content = it.content
                     existing_item.content_hash = ch
@@ -240,14 +263,26 @@ def run_sync(run_id: int, source_id: int) -> None:
 
             source.last_sync_at = now
             source.last_error = None
-            source.status = "ok"
+            if source.type == "website":
+                source.site_status = site_results
+                failures = [v for v in site_results.values() if v["status"] == "error"]
+                source.status = "warning" if failures and len(failures) < len(site_results) else "error" if failures else "ok"
+                source.last_error = "; ".join(f"{v['name']}: {v['error']}" for v in failures) or None
+            else:
+                source.status = "ok"
             db.flush()  # flush pending items so the count below sees them (autoflush=False)
+            if source.type == "website":
+                for site_url, state in site_results.items():
+                    state["item_count"] = db.query(InfoItem).filter(InfoItem.source_id == source_id, InfoItem.site_url == site_url).count()
+                source.site_status = site_results
             source.item_count = (
                 db.query(InfoItem).filter(InfoItem.source_id == source_id).count()
             )
-            run.status = "succeeded"
+            run.status = "succeeded" if source.status == "ok" else "failed" if source.status == "error" else "succeeded"
             run.finished_at = now
             run.summary = f"同步完成: 新增 {new_count} 条, 更新 {updated_count} 条"
+            if source.status == "warning":
+                run.summary += f"; {len(failures)} 个网站失败"
             _log(db, run_id, "INFO", run.summary)
             db.commit()
         except Exception as exc:  # noqa: BLE001
