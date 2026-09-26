@@ -22,7 +22,7 @@
           <p>{{ describe(s) }}</p>
           <div v-if="s.type === 'website' && s.site_status" class="meta" style="display:block">
             <div v-for="(state, url) in s.site_status" :key="url">
-              {{ state.name }} · {{ state.status }} · {{ state.item_count }} 条 · {{ state.last_sync_at || '未同步' }}
+              {{ state.name }} · {{ state.status }} · {{ state.item_count }} 条 · {{ formatBeijing(state.last_sync_at) }}
               <span v-if="state.error" class="error">{{ state.error }}</span>
             </div>
           </div>
@@ -182,6 +182,11 @@ onMounted(async () => {
 
 async function load() {
   sources.value = await listSourcesApi()
+}
+
+function formatBeijing(value: string | null): string {
+  if (!value) return '未同步'
+  return new Intl.DateTimeFormat('zh-CN', { timeZone: 'Asia/Shanghai', dateStyle: 'short', timeStyle: 'medium' }).format(new Date(value))
 }
 
 function typeLabel(t: string) {
