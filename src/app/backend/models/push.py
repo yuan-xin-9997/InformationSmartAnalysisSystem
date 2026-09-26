@@ -12,10 +12,9 @@ A ``PushRun`` records one push execution (succeeded / failed / no_new).
 ``SmtpConfig`` is a single-row (``id=1``) table that overrides the ``email``
 section in ``app.json`` when present -- page config takes priority over file.
 
-Note: the legacy ``task_ids`` JSON column (multi-task, N:M) is retained on the
-DB for migration only and is intentionally NOT mapped on the ORM; the
-consolidation migration (``core/database.py``) reads it via raw SQL, splits
-multi-task rules into per-task 1:1 rules, then ignores it thereafter.
+Note: the consolidation migration (``core/database.py``) reads the legacy
+``task_ids`` JSON column via raw SQL, splits multi-task rules into per-task 1:1
+rules, and then removes the obsolete column.
 """
 from __future__ import annotations
 

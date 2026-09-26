@@ -107,7 +107,8 @@ def _migrate_consolidate_task_analysis(engine_) -> None:
 
     - PushRule：把遗留多任务规则（``task_ids`` JSON 数组）按任务拆分为 1:1
       规则（水位线原样复制--``AnalysisResult.id`` 全局单调，安全），回填单任务
-      规则的 ``task_id``，删除遗留行；之后每条 push_rule 的 ``task_id`` 非空。
+      规则的 ``task_id``，删除遗留行和 ``task_ids`` 列；之后每条
+      push_rule 的 ``task_id`` 非空。
     - ScheduledJob / PushRule：按 ``task_id`` 收敛重复行至最新一条。
     - PagePermission：曾持有 ``scheduled_jobs``/``push_management`` 的用户补授
       ``analysis_tasks``，并删除两个旧键。
@@ -146,6 +147,10 @@ def _migrate_consolidate_task_analysis(engine_) -> None:
             conn.execute(
                 text("DELETE FROM push_rules WHERE task_id IS NULL AND task_ids IS NOT NULL")
             )
+
+            # 旧列是 NOT NULL 且无默认值。若只停用而不删除，新 ORM 在
+            # 创建单任务推送规则时不再写它，SQLite 会报 NOT NULL 错误。
+            conn.execute(text("ALTER TABLE push_rules DROP COLUMN task_ids"))
 
         # 2. 按 task_id 收敛重复行（含拆分后同任务多规则的情况）。
         _collapse_dup_by_task_id(conn, "scheduled_jobs")

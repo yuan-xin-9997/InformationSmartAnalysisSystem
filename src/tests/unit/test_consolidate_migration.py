@@ -171,6 +171,31 @@ def test_empty_task_ids_rule_deleted():
     assert n[0] == 0
 
 
+def test_legacy_task_ids_column_removed_and_new_rule_can_be_inserted():
+    """The old NOT NULL column must not block inserts made by the new ORM."""
+    eng = _build_legacy_engine()
+    _prepare(eng)
+
+    columns = {column["name"] for column in inspect(eng).get_columns("push_rules")}
+    assert "task_ids" not in columns
+
+    with eng.begin() as conn:
+        conn.execute(
+            text(
+                "INSERT INTO push_rules (name, channel, task_id, event_types, recipients, "
+                "trigger_mode, enabled, max_events_per_email, created_at, updated_at) "
+                "VALUES ('new', 'email', 9, '[\"per_item\"]', '[\"new@x.com\"]', "
+                "'on_run', 1, 50, '2026-01-02 00:00:00', '2026-01-02 00:00:00')"
+            )
+        )
+
+    with eng.begin() as conn:
+        inserted = conn.execute(
+            text("SELECT COUNT(*) FROM push_rules WHERE task_id = 9")
+        ).scalar_one()
+    assert inserted == 1
+
+
 def test_duplicate_push_rules_same_task_collapsed():
     eng = _build_legacy_engine()
     _prepare(eng)
