@@ -31,11 +31,15 @@ def test_multisite_api_partial_failure(client, admin_headers, sync_worker, monke
     assert source['item_count'] == 1
     assert source['site_status'][sites[1]['url']]['status'] == 'error'
     assert source['site_status'][sites[0]['url']]['item_count'] == 1
+    assert source['site_status'][sites[2]['url']]['item_count'] == 0
     items = client.get(f'/api/info-sources/{sid}/items', headers=admin_headers).json()
     assert len(items) == 1
     assert items[0]['site_name'] == 'First'
     assert items[0]['site_url'] == sites[0]['url']
     assert client.get(f'/api/info-sources/{sid}/items', params={'site_url': sites[2]['url']}, headers=admin_headers).json() == []
+    client.post(f'/api/info-sources/{sid}/sync', headers=admin_headers)
+    source = client.get(f'/api/info-sources/{sid}', headers=admin_headers).json()
+    assert source['site_status'][sites[0]['url']]['item_count'] == 1
 
 
 def test_legacy_source_api(client, admin_headers, sync_worker, monkeypatch):

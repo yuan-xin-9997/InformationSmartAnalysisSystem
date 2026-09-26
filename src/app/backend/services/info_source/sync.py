@@ -264,7 +264,6 @@ def run_sync(run_id: int, source_id: int) -> None:
             source.last_sync_at = now
             source.last_error = None
             if source.type == "website":
-                source.site_status = site_results
                 failures = [v for v in site_results.values() if v["status"] == "error"]
                 source.status = "warning" if failures and len(failures) < len(site_results) else "error" if failures else "ok"
                 source.last_error = "; ".join(f"{v['name']}: {v['error']}" for v in failures) or None
@@ -272,7 +271,6 @@ def run_sync(run_id: int, source_id: int) -> None:
                 source.status = "ok"
             db.flush()  # flush pending items so the count below sees them (autoflush=False)
             if source.type == "website":
-                db.flush()  # SessionLocal autoflush=False; include newly inserted rows in per-site totals.
                 for site_url, state in site_results.items():
                     state["item_count"] = db.query(InfoItem).filter(InfoItem.source_id == source_id, InfoItem.site_url == site_url).count()
                 source.site_status = site_results
