@@ -13,6 +13,8 @@ def test_registry_has_email_channel():
 
 def test_email_channel_send_uses_smtp(monkeypatch):
     import smtplib
+    from email import policy
+    from email.parser import Parser
 
     from app.backend.services.push.channels.email_channel import EmailChannel
     from app.backend.services.push.smtp_config import ResolvedSmtpConfig
@@ -53,16 +55,31 @@ def test_email_channel_send_uses_smtp(monkeypatch):
         from_name="机器人",
         source="page",
     )
-    EmailChannel().send(cfg, ["a@x.com"], "主题", "<b>html</b>", "text")
+    EmailChannel().send(
+        cfg,
+        ["a@x.com;", "b@x.com"],
+        "主题",
+        "<b>html</b>",
+        "text",
+    )
     assert sent["host"] == "h"
     assert sent["starttls"] is True
     assert sent["login"] == ("u", "p")
     assert sent["from"] == "f@x.com"
-    assert sent["to"] == ["a@x.com"]
-    # 主题/发件人名(中文)经 MIME 编码，校验结构而非字面值
+    assert sent["to"] == ["a@x.com", "b@x.com"]
+    # 中文显示名必须单独编码；邮箱地址若被包进 encoded-word，QQ 会以 550 拒收。
     assert "Subject:" in sent["msg"]
     assert "From:" in sent["msg"]
     assert "multipart/alternative" in sent["msg"]
+    parsed = Parser(policy=policy.default).parsestr(sent["msg"])
+    assert not parsed["From"].defects
+    assert parsed["From"].addresses[0].display_name == "机器人"
+    assert parsed["From"].addresses[0].addr_spec == "f@x.com"
+    assert not parsed["To"].defects
+    assert [address.addr_spec for address in parsed["To"].addresses] == [
+        "a@x.com",
+        "b@x.com",
+    ]
 
 
 def test_email_channel_send_with_attachments(monkeypatch):

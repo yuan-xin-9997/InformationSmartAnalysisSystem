@@ -13,11 +13,13 @@ MIME structure:
 """
 from __future__ import annotations
 
+import re
 import smtplib
 from email import encoders
 from email.mime.base import MIMEBase
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
+from email.utils import formataddr
 
 from ....core.logging import get_logger
 from ..attachments import Attachment, InlineImage
@@ -26,6 +28,17 @@ from ..smtp_config import ResolvedSmtpConfig
 _logger = get_logger("push.email")
 
 _SMTP_TIMEOUT = 30
+_RECIPIENT_SEPARATOR = re.compile(r"[,，;；\s]+")
+
+
+def _normalize_recipients(recipients: list[str]) -> list[str]:
+    """Normalize UI/API recipient values before building headers and envelope."""
+    return [
+        address
+        for value in recipients
+        for address in _RECIPIENT_SEPARATOR.split(value.strip())
+        if address
+    ]
 
 
 class EmailChannel:
@@ -64,6 +77,9 @@ class EmailChannel:
         attachments: list | None = None,
         inline_images: list | None = None,
     ) -> None:
+        recipients = _normalize_recipients(recipients)
+        if not recipients:
+            raise ValueError("收件人邮箱不能为空")
         inline_images = inline_images or []
         attachments = attachments or []
         alt = self._alt_part(html, text)
@@ -89,10 +105,10 @@ class EmailChannel:
             msg = alt
 
         msg["Subject"] = subject
-        if cfg.from_name:
-            msg["From"] = f"{cfg.from_name} <{cfg.from_email}>"
-        else:
-            msg["From"] = cfg.from_email
+        # Keep the addr-spec outside the encoded display-name word. Encoding the
+        # entire ``中文名 <addr>`` string makes strict receivers treat From as an
+        # invalid non-ASCII local part (QQ returns SMTP 550 for that message).
+        msg["From"] = formataddr((cfg.from_name, cfg.from_email), charset="utf-8")
         msg["To"] = ", ".join(recipients)
 
         if cfg.use_ssl:

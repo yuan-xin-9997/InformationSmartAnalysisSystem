@@ -573,7 +573,7 @@ function buildSchedule(): ScheduleConfig | null {
 }
 function buildPush(): PushConfig | null {
   if (!push.enabled) return null
-  const recips = recipientsText.value.split(/[,，\s]+/).map((s) => s.trim()).filter(Boolean)
+  const recips = recipientsText.value.split(/[,，;；\s]+/).map((s) => s.trim()).filter(Boolean)
   return {
     enabled: true,
     event_types: push.event_types,
