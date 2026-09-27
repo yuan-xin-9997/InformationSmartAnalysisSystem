@@ -200,3 +200,8 @@ src
 - Blocks & Files：`https://www.blocksandfiles.com/flash/`，文章链接规则 `a[href*="/flash/20"]`（公开页面可见文章链接；当前集中抓取服务收到无链接的拦截页，暂不能入库）。
 - JEDEC：候选公告栏目 `https://www.jedec.org/news/pressreleases`；当前网络实测返回 403，不能确认页面链接结构。可在允许访问的网络中使用 `browser` 模式检查，确认后填入实际文章链接选择器；若仍 403，应使用其公开 RSS 或获得站点许可。
 - SNIA：候选新闻栏目 `https://www.snia.org/news-events/news`；当前网络实测返回 403，不能确认页面链接结构。可在允许访问的网络中使用 `browser` 模式检查，确认后填入实际文章链接选择器；若仍 403，应使用其公开 RSS 或获得站点许可。
+# 分析前更新数据
+
+分析任务默认在每次手动或定时运行前更新绑定信息源，再执行分析和现有推送规则。任务编辑页可关闭“分析前更新数据”，或设置“数据新鲜度有效期”（默认 15 分钟）。本地文件夹每次进行增量扫描，官方网站和 FreshRSS 在有效期内跳过重复获取。更新按信息源串行，多个任务共享来源时复用已完成的更新。单个来源失败不会阻止其他来源；运行详情列出每个来源的新增、更新、跳过和失败结果，以及更新、分析两个阶段的时间。旧任务默认开启此功能。
+
+`POST /api/analysis-tasks` 和 `PUT /api/analysis-tasks/{id}` 的 `config` 可包含 `refresh_before_run`（布尔值，默认 `true`）与 `refresh_max_age_seconds`（非负整数，默认 `900`）。`GET /api/task-center/runs/{id}` 的 `refresh_detail` 返回阶段时间及 `sources` 数组，各来源含 `source_id`、`source_name`、`status`、`added_count`、`updated_count`、`error`、`reason`、`started_at` 和 `finished_at`；时间按北京时间显示。

@@ -7,6 +7,7 @@ metadata/figures, and exposes ``reextract_item`` for manual re-extraction.
 from __future__ import annotations
 
 import hashlib
+from threading import Lock, RLock
 from pathlib import Path
 
 from sqlalchemy import or_, select
@@ -25,6 +26,13 @@ _logger = get_logger("sync")
 
 # Cap on legacy items backfilled per sync run (avoids long-running syncs).
 _BACKFILL_LIMIT = 200
+_locks_guard = Lock()
+_source_locks: dict[int, RLock] = {}
+
+
+def source_lock(source_id: int) -> RLock:
+    with _locks_guard:
+        return _source_locks.setdefault(source_id, RLock())
 
 
 def _content_hash(content: str) -> str:
@@ -92,6 +100,12 @@ def _apply_metadata(item: InfoItem, extra: dict) -> None:
 
 
 def run_sync(run_id: int, source_id: int) -> None:
+    """Serialize manual and analysis-triggered updates for one source."""
+    with source_lock(source_id):
+        _run_sync(run_id, source_id)
+
+
+def _run_sync(run_id: int, source_id: int) -> None:
     """Fetch new items for a source and upsert them. Updates the TaskRun."""
     with SessionLocal() as db:
         run = db.get(TaskRun, run_id)
@@ -135,8 +149,9 @@ def run_sync(run_id: int, source_id: int) -> None:
                         items.extend(fetched)
                         site_results[site_url] = {"name": site["name"], "last_sync_at": utcnow().isoformat(), "status": "ok", "error": None, "item_count": len(fetched)}
                     except Exception as exc:  # one site must not abort the rest
-                        site_results[site_url] = {"name": site["name"], "last_sync_at": utcnow().isoformat(), "status": "error", "error": str(exc), "item_count": 0}
-                        _log(db, run_id, "ERROR", f"网站 {site['name']} 同步失败: {exc}")
+                        site_results[site_url] = {"name": site["name"], "last_sync_at": utcnow().isoformat(), "status": "error", "error": "网站更新失败，请查看服务日志", "item_count": 0}
+                        _logger.error("网站更新失败: %s", site["name"])
+                        _log(db, run_id, "ERROR", f"网站 {site['name']} 更新失败，请查看服务日志")
             else:
                 items = adapter.fetch_new_items(
                     since=source.last_sync_at,
@@ -145,7 +160,11 @@ def run_sync(run_id: int, source_id: int) -> None:
             new_count = 0
             updated_count = 0
             now = utcnow()
+            seen_ids: set[str] = set()
             for it in items:
+                if it.external_id in seen_ids:
+                    continue
+                seen_ids.add(it.external_id)
                 ch = _content_hash(it.content or it.external_id)
                 if it.external_id not in existing:
                     item = InfoItem(
@@ -167,6 +186,7 @@ def run_sync(run_id: int, source_id: int) -> None:
                     if figures:
                         _save_figures(db, item.id, figures, settings.figures_dir)
                     new_count += 1
+                    existing[it.external_id] = ch
                 elif existing[it.external_id] != ch:
                     existing_item = db.scalars(
                         select(InfoItem).where(
@@ -190,6 +210,19 @@ def run_sync(run_id: int, source_id: int) -> None:
                         db, existing_item.id, figures, settings.figures_dir
                     )
                     updated_count += 1
+                    existing[it.external_id] = ch
+
+            if source.type == "local_folder":
+                # A vanished file must disappear from the index before analysis.
+                live_ids = {str(path.resolve()) for path in adapter._iter_files()}
+                for missing in db.scalars(select(InfoItem).where(InfoItem.source_id == source_id)).all():
+                    if missing.external_id not in live_ids:
+                        for fig in db.scalars(select(InfoItemFigure).where(InfoItemFigure.item_id == missing.id)).all():
+                            try:
+                                Path(fig.storage_path).unlink(missing_ok=True)
+                            except OSError:
+                                pass
+                        db.delete(missing)
 
             # --- backfill: legacy items that lack metadata/figures, plus items
             # whose body text never extracted cleanly (extraction_method='none'
@@ -280,18 +313,19 @@ def run_sync(run_id: int, source_id: int) -> None:
             run.status = "succeeded" if source.status == "ok" else "failed" if source.status == "error" else "succeeded"
             run.finished_at = now
             run.summary = f"同步完成: 新增 {new_count} 条, 更新 {updated_count} 条"
+            run.refresh_detail = {"added_count": new_count, "updated_count": updated_count}
             if source.status == "warning":
                 run.summary += f"; {len(failures)} 个网站失败"
             _log(db, run_id, "INFO", run.summary)
             db.commit()
         except Exception as exc:  # noqa: BLE001
-            _logger.exception("信息源同步失败: %s", source.name)
-            source.last_error = str(exc)
+            _logger.error("信息源同步失败: %s", source.name)
+            source.last_error = "更新数据失败，请查看服务日志"
             source.status = "error"
             run.status = "failed"
-            run.error = str(exc)
+            run.error = "更新数据失败，请查看服务日志"
             run.finished_at = utcnow()
-            _log(db, run_id, "ERROR", f"同步失败: {exc}")
+            _log(db, run_id, "ERROR", run.error)
             db.commit()
 
 

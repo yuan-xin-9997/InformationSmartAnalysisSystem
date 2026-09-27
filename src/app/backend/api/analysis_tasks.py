@@ -44,6 +44,16 @@ from ..services.push.service import run_push
 router = APIRouter(prefix="/api/analysis-tasks", tags=["分析任务"])
 
 
+def _validate_refresh_config(config: dict) -> dict:
+    enabled = config.get("refresh_before_run", True)
+    age = config.get("refresh_max_age_seconds", 900)
+    if not isinstance(enabled, bool):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "refresh_before_run 必须是布尔值")
+    if isinstance(age, bool) or not isinstance(age, int) or age < 0:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "refresh_max_age_seconds 必须是非负整数")
+    return config
+
+
 # ---------- sub-config helpers (1:1 schedule / push) ----------
 
 
@@ -237,7 +247,7 @@ def create_task(
     db: Session = Depends(get_db),
 ):
     task = AnalysisTask(
-        name=req.name, description=req.description, config=req.config or {}
+        name=req.name, description=req.description, config=_validate_refresh_config(req.config or {})
     )
     for sid in req.source_ids:
         if db.get(InfoSource, sid) is None:
@@ -287,7 +297,7 @@ def update_task(
     if req.description is not None:
         task.description = req.description
     if req.config is not None:
-        task.config = req.config
+        task.config = _validate_refresh_config(req.config)
     if req.source_ids is not None:
         db.query(TaskSource).filter(TaskSource.task_id == task_id).delete()
         for sid in req.source_ids:

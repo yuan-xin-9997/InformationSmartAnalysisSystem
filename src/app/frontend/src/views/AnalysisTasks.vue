@@ -88,6 +88,11 @@
             </select>
           </label>
           <label>说明<input v-model.trim="form.description" placeholder="可选" /></label>
+          <label class="check"><input type="checkbox" v-model="form.refreshBeforeRun" /> 分析前更新数据</label>
+          <label v-if="form.refreshBeforeRun">数据新鲜度有效期（分钟）
+            <input v-model.number="form.refreshMaxAgeMinutes" type="number" min="0" step="1" />
+          </label>
+          <p class="muted">本地文件夹执行增量扫描，网站和 RSS 获取最新内容。</p>
           <fieldset>
             <legend>绑定信息源</legend>
             <label v-for="s in allSources" :key="s.id" class="check">
@@ -388,6 +393,8 @@ const form = reactive({
   description: '',
   mode: 'per_item',
   selectionStrategy: 'sequential',
+  refreshBeforeRun: true,
+  refreshMaxAgeMinutes: 15,
   source_ids: [] as number[],
   custom_item_ids: [] as number[],
 })
@@ -512,6 +519,8 @@ function openCreate() {
   form.description = ''
   form.mode = 'per_item'
   form.selectionStrategy = 'sequential'
+  form.refreshBeforeRun = true
+  form.refreshMaxAgeMinutes = 15
   form.source_ids = []
   form.custom_item_ids = []
   configText.value = ''
@@ -538,6 +547,8 @@ function openEdit(t: AnalysisTaskDetail) {
   form.description = t.description
   form.mode = (t.config?.mode as string) || 'per_item'
   form.selectionStrategy = (t.config?.selection_strategy as string) === 'newest_unanalyzed' ? 'newest_unanalyzed' : 'sequential'
+  form.refreshBeforeRun = t.config?.refresh_before_run !== false
+  form.refreshMaxAgeMinutes = Number(t.config?.refresh_max_age_seconds ?? 900) / 60
   form.source_ids = t.sources.map((s) => s.source_id)
   form.custom_item_ids = [...((t.config?.custom_item_ids as number[] | undefined) || [])]
   configText.value = JSON.stringify(t.config || {}, null, 2)
@@ -597,6 +608,12 @@ async function onSave() {
   }
   config.mode = form.mode
   config.selection_strategy = form.selectionStrategy
+  if (!Number.isInteger(form.refreshMaxAgeMinutes) || form.refreshMaxAgeMinutes < 0) {
+    showToast('数据新鲜度有效期需为非负整数分钟')
+    return
+  }
+  config.refresh_before_run = form.refreshBeforeRun
+  config.refresh_max_age_seconds = form.refreshMaxAgeMinutes * 60
   if (form.mode === 'custom') {
     config.custom_item_ids = form.custom_item_ids
     if (!form.custom_item_ids.length) {

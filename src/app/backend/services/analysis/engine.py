@@ -11,12 +11,13 @@ from sqlalchemy import func
 
 from ...core.database import SessionLocal
 from ...core.logging import get_logger
-from ...core.timeutil import utcnow
+from ...core.timeutil import utcnow, iso_beijing
 from ...models.analysis import AnalysisResult, AnalysisTask, TaskSource
-from ...models.info_source import InfoItem
+from ...models.info_source import InfoItem, InfoSource
 from ...models.scheduled_job import ScheduledJob
 from ...models.task import TaskLog, TaskRun
 from ..push.service import on_analysis_completed
+from ..info_source.refresh import refresh, as_dict
 from . import prompts as P
 from .llm_client import LLMClient, LLMError
 
@@ -95,6 +96,37 @@ def run_analysis(
             task_sources = (
                 db.query(TaskSource).filter(TaskSource.task_id == task_id).all()
             )
+            source_ids = [ts.source_id for ts in task_sources]
+            db.commit()  # release the read transaction before sync writes via another session
+            refresh_results = []
+            refresh_started = utcnow()
+            if cfg.get("refresh_before_run", True):
+                max_age = int(cfg.get("refresh_max_age_seconds", 900))
+                if max_age < 0:
+                    raise ValueError("数据新鲜度有效期不能为负数")
+                for source_id in source_ids:
+                    try:
+                        result = refresh(source_id, max_age)
+                        detail = as_dict(result)
+                    except Exception:
+                        _logger.error("更新信息源失败: %s", source_id)
+                        source = db.get(InfoSource, source_id)
+                        detail = {"source_id": source_id, "source_name": source.name if source else "(已删除)",
+                                  "status": "failed", "added_count": 0, "updated_count": 0,
+                                  "error": "更新数据失败，请查看服务日志", "started_at": iso_beijing(utcnow()),
+                                  "finished_at": iso_beijing(utcnow())}
+                    refresh_results.append(detail)
+                    _log(db, run_id, "WARNING" if detail["status"] == "failed" else "INFO",
+                         f"更新数据 [{detail['source_name']}]: {detail['status']}, 新增 {detail['added_count']}, 更新 {detail['updated_count']}"
+                         + (f", 原因: {detail.get('reason') or detail.get('error')}" if detail.get('reason') or detail.get('error') else ""))
+            else:
+                _log(db, run_id, "INFO", "已关闭分析前更新数据")
+            refresh_finished = utcnow()
+            run.refresh_detail = {"started_at": iso_beijing(refresh_started), "finished_at": iso_beijing(refresh_finished),
+                                  "sources": refresh_results, "analysis_started_at": iso_beijing(utcnow())}
+            db.commit()
+            db.expire_all()
+            failed_refreshes = sum(r["status"] == "failed" for r in refresh_results)
             total_items = 0
             total_results = 0
 
@@ -225,14 +257,20 @@ def run_analysis(
                     total_items += len(items)
 
             run.finished_at = utcnow()
+            run.refresh_detail = {**(run.refresh_detail or {}), "analysis_finished_at": iso_beijing(run.finished_at)}
             run.summary = f"分析完成: 处理 {total_items} 条信息, 生成 {total_results} 条结果"
+            if failed_refreshes:
+                run.summary += f"; 部分更新失败 ({failed_refreshes}/{len(refresh_results)})" if failed_refreshes < len(refresh_results) else "; 所有来源更新失败"
+            if failed_refreshes and total_items == 0:
+                run.status = "failed"
+                run.error = "信息源更新失败，且没有可分析的增量数据"
             if failed_count:
                 run.summary += f", 失败 {failed_count} 条 (详见任务日志 WARNING)"
             # 全部条目都失败时不得记为成功——否则会触发推送发出一封空正文邮件。
             if failed_count and total_results == 0:
                 run.status = "failed"
                 run.error = f"全部 {failed_count} 条分析失败，未产生任何结果"
-            else:
+            elif run.status != "failed":
                 run.status = "succeeded"
                 analysis_ok = True
             _log(db, run_id, "INFO", run.summary)

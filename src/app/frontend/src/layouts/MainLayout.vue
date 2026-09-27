@@ -67,7 +67,7 @@ const pageMeta: Record<string, [string, string]> = {
   dashboard: ['概览', '信息源、分析任务与最近运行的整体情况'],
   info_sources: ['信息源管理', '添加与管理官方网站、本地文件夹、FreshRSS 信息源'],
   analysis_tasks: ['任务分析', '绑定信息源并配置定时分析与推送，触发智能分析'],
-  task_center: ['任务中心', '查看同步与分析任务运行状态及日志'],
+  task_center: ['任务中心', '查看更新数据与分析任务的运行状态及日志'],
   permission: ['权限管理', '维护用户角色与可访问页面'],
   system_config: ['系统配置', '查看运行配置（敏感字段已脱敏）'],
 }

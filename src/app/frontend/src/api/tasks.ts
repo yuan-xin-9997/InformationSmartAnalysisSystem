@@ -112,6 +112,13 @@ export interface TaskRun {
 }
 
 export interface TaskRunDetail extends TaskRun {
+  refresh_detail?: {
+    started_at?: string
+    finished_at?: string
+    analysis_started_at?: string
+    analysis_finished_at?: string
+    sources?: Array<{ source_id: number; source_name: string; status: string; added_count: number; updated_count: number; reason?: string | null; error?: string | null; started_at: string; finished_at: string }>
+  } | null
   logs: { id: number; run_id: number | null; level: string; message: string; created_at: string }[]
 }
 

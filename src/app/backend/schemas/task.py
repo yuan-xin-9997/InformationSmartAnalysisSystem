@@ -14,6 +14,7 @@ class TaskRunOut(ORMBase):
     started_at: BeijingDatetime | None
     finished_at: BeijingDatetime | None
     summary: str | None
+    refresh_detail: dict | None = None
     error: str | None
     created_at: BeijingDatetime
 
