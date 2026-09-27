@@ -48,7 +48,7 @@ def refresh(source_id: int, max_age_seconds: int = 900) -> RefreshResult:
             db.add(sync_run)
             db.commit()
             sync_id = sync_run.id
-        run_sync(sync_id, source_id)
+        run_sync(sync_id, source_id, backfill=False)
         with SessionLocal() as db:
             result = db.get(TaskRun, sync_id)
             source = db.get(InfoSource, source_id)

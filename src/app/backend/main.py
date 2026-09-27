@@ -26,6 +26,7 @@ from .core.logging import cleanup_old_logs, get_logger, setup_logging
 from .core.runtime import set_started_at
 from .core.security import sync_users_from_password_file
 from .core.timeutil import utcnow
+from .models.task import TaskRun
 from .services import scheduler as sched_svc
 from .services import worker
 from .services.push import push_scheduler as push_sched_svc
@@ -46,6 +47,12 @@ async def lifespan(app: FastAPI):
     # sync tolerates a missing file and is a no-op).
     with SessionLocal() as db:
         sync_users_from_password_file(db)
+        # An interrupted worker cannot resume after a process restart.
+        db.query(TaskRun).filter(TaskRun.status.in_(("pending", "running"))).update(
+            {"status": "failed", "error": "服务重启，任务已中断", "finished_at": utcnow()},
+            synchronize_session=False,
+        )
+        db.commit()
     sched_svc.start_scheduler()
     push_sched_svc.start_push_scheduler()
     yield

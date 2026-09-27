@@ -80,10 +80,10 @@ def test_partial_failure_continues_and_releases_lock(client, admin_headers, sync
         bad_id = bad.id
     task_id = _task(client, admin_headers, [bad_id, good])
     original = refresh_module.run_sync
-    def fail_bad(run_id, source_id):
+    def fail_bad(run_id, source_id, **kwargs):
         if source_id == bad_id:
             raise RuntimeError("secret=do-not-show")
-        return original(run_id, source_id)
+        return original(run_id, source_id, **kwargs)
     monkeypatch.setattr(refresh_module, "run_sync", fail_bad)
     run = _run(client, admin_headers, task_id)
     assert run["status"] == "succeeded"
@@ -104,7 +104,7 @@ def test_shared_source_serializes_update(client, admin_headers, monkeypatch):
         sid = source.id
     calls = []
     calls_lock = Lock()
-    def fake_sync(run_id, source_id):
+    def fake_sync(run_id, source_id, **kwargs):
         with calls_lock:
             calls.append(source_id)
         time.sleep(0.05)

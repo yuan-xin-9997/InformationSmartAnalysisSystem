@@ -99,13 +99,13 @@ def _apply_metadata(item: InfoItem, extra: dict) -> None:
     item.extraction_method = extra.get("extraction_method")
 
 
-def run_sync(run_id: int, source_id: int) -> None:
+def run_sync(run_id: int, source_id: int, *, backfill: bool = True) -> None:
     """Serialize manual and analysis-triggered updates for one source."""
     with source_lock(source_id):
-        _run_sync(run_id, source_id)
+        _run_sync(run_id, source_id, backfill=backfill)
 
 
-def _run_sync(run_id: int, source_id: int) -> None:
+def _run_sync(run_id: int, source_id: int, *, backfill: bool = True) -> None:
     """Fetch new items for a source and upsert them. Updates the TaskRun."""
     with SessionLocal() as db:
         run = db.get(TaskRun, run_id)
@@ -228,7 +228,7 @@ def _run_sync(run_id: int, source_id: int) -> None:
             # whose body text never extracted cleanly (extraction_method='none'
             # or empty content) so the vision fallback can retry them. ---
             backfill_count = 0
-            if hasattr(adapter, "reextract") and source.type == "local_folder":
+            if backfill and hasattr(adapter, "reextract") and source.type == "local_folder":
                 # Only target items that existed BEFORE this run
                 # (fetched_at < now). Newly created/updated items in this run
                 # already carry fresh extraction_method/figures; re-processing
