@@ -25,7 +25,7 @@
 |---|---|---|---|
 | 登录 | `/login` | 用户名/密码登录 | 公开 |
 | 概览 | `/dashboard` | 信息源/任务/最近运行概览 | `dashboard` |
-| 信息源管理 | `/info-sources` | 三类信息源 CRUD、状态检查、手动同步、查看条目 | `info_sources` |
+| 信息源管理 | `/info-sources` | 三类信息源 CRUD、状态检查、手动同步、查看条目及点击标题预览正文 | `info_sources` |
 | 分析任务 | `/analysis-tasks` | 任务 CRUD、绑定源、查看源状态、触发全量/增量分析；「结果」按钮下钻进入任务结果详情页（按运行批次分组、折叠展开 Markdown 渲染） | `analysis_tasks` |
 | 定时任务 | `/scheduled-jobs` | 为分析任务配置 cron/固定间隔定时执行，支持启用/禁用、立即执行、编辑、删除 | `scheduled_jobs` |
 | 任务中心 | `/task-center` | 系统任务运行列表、状态、日志（支持按 `ref_id` 过滤某任务的运行记录） | `task_center` |

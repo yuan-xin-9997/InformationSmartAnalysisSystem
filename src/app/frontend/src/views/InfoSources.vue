@@ -115,7 +115,7 @@
           <thead><tr><th>标题</th><th>网站来源</th><th>已分析</th><th>发布时间</th></tr></thead>
           <tbody>
             <tr v-for="it in items" :key="it.id">
-              <td>{{ it.title || '(无标题)' }}</td>
+              <td><button class="link" @click="openPreview(it)">{{ it.title || '(无标题)' }}</button></td>
               <td>{{ it.site_name || '-' }}</td>
               <td><span :class="['pill', it.analyzed ? 'ok' : '']">{{ it.analyzed ? '是' : '否' }}</span></td>
               <td>{{ it.published_at || '-' }}</td>
@@ -131,6 +131,19 @@
         </div>
       </div>
     </div>
+    <div v-if="previewVisible" class="modal item-preview-modal" @click.self="closePreview">
+      <div class="modal-card large">
+        <div class="modal-head">
+          <div><p class="eyebrow">ITEM PREVIEW</p><h2>{{ preview?.title || previewTitle }}</h2></div>
+          <button type="button" aria-label="关闭正文预览" @click="closePreview">×</button>
+        </div>
+        <p v-if="preview" class="muted">{{ preview.site_name || currentSource?.name }} · {{ preview.published_at || '发布时间未知' }}</p>
+        <div v-if="previewLoading" class="empty compact">正文加载中...</div>
+        <pre v-else-if="preview?.content" class="content-pre">{{ preview.content }}</pre>
+        <div v-else class="empty compact">暂无可预览正文</div>
+        <div v-if="preview?.url" class="modal-actions"><a :href="preview.url" target="_blank" rel="noopener noreferrer">查看原文</a></div>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -139,8 +152,8 @@ import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { showToast } from '@/composables/toast'
 import {
   listSourcesApi, createSourceApi, updateSourceApi, deleteSourceApi,
-  checkSourceApi, syncSourceApi, listItemsApi, countItemsApi, getTypesApi,
-  type InfoSource, type InfoItemBrief, type SourceTypeSpec,
+  checkSourceApi, syncSourceApi, listItemsApi, countItemsApi, getTypesApi, getItemApi,
+  type InfoSource, type InfoItemBrief, type InfoItem, type SourceTypeSpec,
 } from '@/api/sources'
 
 const sources = ref<InfoSource[]>([])
@@ -165,6 +178,33 @@ const page = ref(1)
 const pageSize = ref(50)
 const filter = ref<'' | 'analyzed' | 'unanalyzed'>('')
 const counts = ref({ total: 0, all: 0, analyzed: 0, unanalyzed: 0 })
+const previewVisible = ref(false)
+const previewLoading = ref(false)
+const preview = ref<InfoItem | null>(null)
+const previewTitle = ref('')
+let previewRequest = 0
+
+async function openPreview(item: InfoItemBrief) {
+  const requestId = ++previewRequest
+  previewTitle.value = item.title || '(无标题)'
+  preview.value = null
+  previewLoading.value = true
+  previewVisible.value = true
+  try {
+    const result = await getItemApi(item.source_id, item.id)
+    if (requestId === previewRequest) preview.value = result
+  } catch {
+    if (requestId === previewRequest) closePreview()
+  } finally {
+    if (requestId === previewRequest) previewLoading.value = false
+  }
+}
+
+function closePreview() {
+  previewRequest++
+  previewVisible.value = false
+  preview.value = null
+}
 
 watch(() => form.type, (type) => {
   if (type === 'website' && !sites.value.length) addSite()
