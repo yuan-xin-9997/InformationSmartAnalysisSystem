@@ -81,6 +81,26 @@ def test_dedup_on_resync(client, admin_headers, sync_worker, mock_llm):
     assert status["item_count"] == 1
 
 
+def test_digest_mode_generates_title_link_without_llm(client, admin_headers, sync_worker):
+    """文章清单模式直接生成标题链接，并推进增量水位线。"""
+    sid = _make_folder_source(client, admin_headers, {"a.txt": "内容A"})
+    tid = client.post(
+        "/api/analysis-tasks",
+        headers=admin_headers,
+        json={"name": "日报", "config": {"mode": "digest"}, "source_ids": [sid]},
+    ).json()["id"]
+
+    run = _run(client, admin_headers, tid, "incremental")
+    assert run["status"] == "succeeded"
+    assert "生成 1 条结果" in run["summary"]
+    results = client.get(f"/api/analysis-tasks/{tid}/results", headers=admin_headers).json()
+    assert len(results) == 1
+    assert "a.txt" in results[0]["content"]
+
+    second = _run(client, admin_headers, tid, "incremental")
+    assert "处理 0 条" in second["summary"]
+
+
 def test_custom_mode_analyzes_selected_items(client, admin_headers, sync_worker, mock_llm):
     sid = _make_folder_source(client, admin_headers, {"a.txt": "内容A", "b.txt": "内容B", "c.txt": "内容C"})
     items = client.get(f"/api/info-sources/{sid}/items?limit=10", headers=admin_headers).json()

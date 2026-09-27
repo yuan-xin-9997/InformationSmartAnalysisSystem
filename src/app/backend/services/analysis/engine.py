@@ -87,11 +87,12 @@ def run_analysis(
 
         try:
             cfg: dict[str, Any] = task.config or {}
-            analysis_mode = cfg.get("mode") or "per_item"  # per_item | aggregate
+            analysis_mode = cfg.get("mode") or "per_item"  # per_item | aggregate | digest
             max_per = int(cfg.get("max_items_per_source") or 50)
             system_prompt = cfg.get("system_prompt") or ""
             user_template = cfg.get("user_prompt_template") or ""
-            llm = llm_client or _make_llm(cfg)
+            # digest 模式只生成“标题 + 原文链接”结果，不需要也不应调用大模型。
+            llm = None if analysis_mode == "digest" else (llm_client or _make_llm(cfg))
 
             task_sources = (
                 db.query(TaskSource).filter(TaskSource.task_id == task_id).all()
@@ -223,6 +224,30 @@ def run_analysis(
                             total_results += 1
                             ts.last_analyzed_item_id = max(it.id for it in items)
                             ts.last_analyzed_at = utcnow()
+                    elif analysis_mode == "digest":
+                        # RSS 日报：每个新增条目直接生成可推送事件。URL 同时保留在
+                        # InfoItem，邮件渲染层会把标题显示为可点击原文链接。
+                        for it in items:
+                            link = it.url or it.external_id
+                            content = (
+                                f"[{it.title or '(无标题)'}]({link})"
+                                if link
+                                else (it.title or "(无标题)")
+                            )
+                            db.add(
+                                AnalysisResult(
+                                    task_run_id=run_id,
+                                    task_id=task_id,
+                                    source_id=ts.source_id,
+                                    info_item_id=it.id,
+                                    result_type="per_item",
+                                    content=content,
+                                )
+                            )
+                            it.analyzed = True
+                            total_results += 1
+                        ts.last_analyzed_item_id = max(it.id for it in items)
+                        ts.last_analyzed_at = utcnow()
                     else:
                         # 水位线只推进到本批**成功**条目的最大 id：失败条目（尤其是
                         # 集中在批次尾部时）下次增量会自动重跑。失败若夹在中间，

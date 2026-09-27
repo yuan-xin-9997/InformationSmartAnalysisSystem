@@ -10,6 +10,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime
 from html import escape
+from urllib.parse import urlsplit
 
 import mistune
 
@@ -34,6 +35,7 @@ class PushEvent:
     created_at: datetime
     # per_item 事件填充；aggregate 留空
     item_title: str | None = None
+    item_url: str | None = None
     file_path: str | None = None
     author: str | None = None
     author_affiliation: str | None = None
@@ -55,7 +57,7 @@ def _meta_pairs(e: PushEvent) -> tuple[list[tuple[str, str]], list[tuple[str, st
     """Return (file_kv, article_kv) for a per_item event; empty for aggregate."""
     if e.result_type != "per_item":
         return [], []
-    file_kv = _nonempty([("文件名", e.item_title), ("文件路径", e.file_path)])
+    file_kv = _nonempty([("标题", e.item_title), ("文件路径", e.file_path)])
     article_kv = _nonempty(
         [
             ("作者", e.author),
@@ -76,7 +78,20 @@ def _meta_rows_html(e: PushEvent) -> str:
         return ""
     parts: list[str] = []
     if file_kv:
-        parts.append("文件：" + " ｜ ".join(f"{k}：{escape(v)}" for k, v in file_kv))
+        rendered = []
+        for k, v in file_kv:
+            if (
+                k == "标题"
+                and e.item_url
+                and urlsplit(e.item_url).scheme in {"http", "https"}
+            ):
+                rendered.append(
+                    f'{k}：<a href="{escape(e.item_url, quote=True)}" target="_blank" '
+                    f'rel="noopener noreferrer">{escape(v)}</a>'
+                )
+            else:
+                rendered.append(f"{k}：{escape(v)}")
+        parts.append("文章：" + " ｜ ".join(rendered))
     if article_kv:
         parts.append("文章：" + " ｜ ".join(f"{k}：{escape(v)}" for k, v in article_kv))
     return (
@@ -92,6 +107,8 @@ def _meta_lines_text(e: PushEvent) -> list[str]:
     lines: list[str] = []
     for k, v in file_kv:
         lines.append(f"  {k}: {v}")
+        if k == "标题" and e.item_url:
+            lines.append(f"  原文链接: {e.item_url}")
     for k, v in article_kv:
         lines.append(f"  {k}: {v}")
     return lines

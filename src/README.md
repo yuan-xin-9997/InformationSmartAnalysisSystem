@@ -14,7 +14,7 @@
 核心能力：
 
 1. 信息源管理：支持「官方网站」「指定本地文件夹」「FreshRSS 指定源」三类信息源。
-2. 分析任务：创建任务并绑定多个信息源作为信息来源范围；展示每个绑定源的状态。
+2. 分析任务：创建任务并绑定多个信息源作为信息来源范围；支持逐条分析、汇总分析及不调用大模型的“文章清单（标题＋原文链接）”模式。
 3. 增量分析：基于信息源新增内容做增量分析（按 (任务,源) 水位线记录已分析位置）；亦支持全量分析。
 4. 邮件推送：把增量分析结果按推送规则（选定任务/事件类型/收件人/触发方式）通过邮件推送到邮箱，支持「完成后自动 / 定时 / 手动」三种触发，SMTP 配置页面优先于 app.json。
 5. 基础模块：登录、权限管理、系统配置、任务中心（CLAUDE.md 规定必备）。
@@ -67,6 +67,22 @@
 - 多网站官方网站：`{"sites":[{"name":"Micron Newsroom","url":"https://www.micron.com/about/press/news","link_selector":"a[href*=\"/about/press/news/\"]","content_selector":"article","mode":"auto","max_items":20}]}`。每个网站可独立配置 `name`、资讯栏目 `url`、`link_selector`、`content_selector`、`mode` 和 `max_items`。旧 `config.url` 自动按单站点处理，无需迁移。同步逐站隔离失败；信息源详情返回 `site_status`，条目返回 `site_name`、`site_url`。`GET /api/info-sources/{id}/items` 和 `/items/count` 支持 `site_url` 筛选。
 - 本地文件夹：`{"folder_path":"/abs/path","patterns":["*.txt","*.md","*.pdf","*.docx","*.html"],"recursive":true,"max_items":100000}`
 - FreshRSS：`{"base_url":"http://freshrss.example.com","user":"admin","api_token":"<API Token>","stream":"user/-/state/com.google/reading-list","mark_as_read":false,"max_items":50}`
+
+#### FreshRSS 媒体日报配置
+
+先在 FreshRSS 中订阅媒体的官方 RSS（订阅地址可能随媒体调整，部署时应在 FreshRSS 中验证）：
+
+- The Economist：`https://www.economist.com/the-world-this-week/rss.xml`
+- Financial Times：`https://www.ft.com/?format=rss`
+- The Wall Street Journal：`https://feeds.a.dj.com/rss/RSSWorldNews.xml`
+- The New York Times：`https://rss.nytimes.com/services/xml/rss/nyt/HomePage.xml`
+- BBC News：`https://feeds.bbci.co.uk/news/rss.xml`
+
+在系统中新增一个 FreshRSS 信息源，`stream` 使用 FreshRSS 阅读列表（默认
+`user/-/state/com.google/reading-list`）或上述订阅所在标签的 stream。随后新建任务：分析模式选择
+“文章清单”，绑定该信息源；定时分析选择“增量”和 `0 9 * * *`（北京时间每天 09:00）；推送选择
+“完成后自动”、事件类型“逐条分析”，收件人填写目标邮箱。文章清单模式不会调用大模型，邮件标题可直接点击打开原文；
+系统按 FreshRSS 条目 ID 和任务水位线双重去重，只推送新增条目。
 
 ### 敏感配置与环境覆盖（env.local）
 

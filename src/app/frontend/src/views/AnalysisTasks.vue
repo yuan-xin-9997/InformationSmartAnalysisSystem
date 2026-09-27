@@ -77,6 +77,7 @@
               <select v-model="form.mode">
                 <option value="per_item">逐条分析（per_item）</option>
                 <option value="aggregate">汇总分析（aggregate）</option>
+                <option value="digest">文章清单（标题＋原文链接，不调用大模型）</option>
                 <option value="custom">自定义（指定条目）</option>
               </select>
             </label>
@@ -467,6 +468,7 @@ async function load() {
 
 function modeLabel(m?: string) {
   if (m === 'aggregate') return '汇总分析'
+  if (m === 'digest') return '文章清单'
   if (m === 'custom') return '自定义'
   return '逐条分析'
 }

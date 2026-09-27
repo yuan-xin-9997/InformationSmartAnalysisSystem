@@ -110,6 +110,7 @@ class FreshRSSAdapter(InfoSourceAdapter):
             published = None
             if it.get("published"):
                 published = datetime.fromtimestamp(it["published"], tz=timezone.utc)
+            origin = it.get("origin") if isinstance(it.get("origin"), dict) else {}
             items.append(
                 InfoItemData(
                     external_id=item_id,
@@ -117,6 +118,10 @@ class FreshRSSAdapter(InfoSourceAdapter):
                     url=url,
                     content=content,
                     published_at=published,
+                    extra={
+                        "site_name": origin.get("title") or origin.get("htmlUrl"),
+                        "site_url": origin.get("htmlUrl") or origin.get("streamId"),
+                    },
                 )
             )
         if self.mark_as_read:

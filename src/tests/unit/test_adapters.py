@@ -116,6 +116,7 @@ def test_freshrss_adapter_parsing(monkeypatch):
                 "alternate": [{"href": "http://a/1"}],
                 "content": {"content": "<p>body1</p>"},
                 "published": 1735689600,
+                "origin": {"title": "BBC", "htmlUrl": "https://www.bbc.com/news"},
             },
             {
                 "id": "item2",
@@ -131,6 +132,8 @@ def test_freshrss_adapter_parsing(monkeypatch):
     assert len(items) == 2
     assert items[0].title == "T1"
     assert items[0].url == "http://a/1"
+    assert items[0].extra["site_name"] == "BBC"
+    assert items[0].extra["site_url"] == "https://www.bbc.com/news"
     assert "body1" in items[0].content
     assert items[1].published_at is not None
     assert "body2" in items[1].content

@@ -104,6 +104,7 @@ def test_render_per_item_includes_file_and_article_info():
             content="c",
             created_at=datetime(2026, 7, 26, tzinfo=timezone.utc),
             item_title="report.pdf",
+            item_url="https://example.com/report",
             file_path="/data/gs/report.pdf",
             author="张三",
             author_affiliation="高盛",
@@ -113,6 +114,8 @@ def test_render_per_item_includes_file_and_article_info():
     ]
     _, html, text, _ = render_events("r", events)
     assert "report.pdf" in html
+    assert 'href="https://example.com/report"' in html
+    assert "原文链接: https://example.com/report" in text
     assert "/data/gs/report.pdf" in html
     assert "张三" in html
     assert "高盛" in html
