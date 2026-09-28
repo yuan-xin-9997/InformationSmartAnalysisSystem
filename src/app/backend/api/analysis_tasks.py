@@ -337,6 +337,42 @@ def delete_task(
     return {"detail": "已删除"}
 
 
+@router.post("/{task_id}/toggle", response_model=AnalysisTaskDetailOut)
+def toggle_task(
+    task_id: int,
+    _: User = Depends(require_page("analysis_tasks")),
+    db: Session = Depends(get_db),
+):
+    """Toggle the task master switch and synchronize all scheduled triggers."""
+    task = db.get(AnalysisTask, task_id)
+    if task is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="分析任务不存在")
+
+    task.enabled = not task.enabled
+    sj = db.scalar(select(ScheduledJob).where(ScheduledJob.task_id == task_id))
+    pr = db.scalar(select(PushRule).where(PushRule.task_id == task_id))
+    db.commit()
+    db.refresh(task)
+
+    if task.enabled:
+        if sj:
+            db.refresh(sj)
+            sched_svc.reschedule_scheduled_job(sj)
+        if pr:
+            db.refresh(pr)
+            reschedule_push_job(pr)
+    else:
+        if sj:
+            sched_svc.remove_scheduled_job(sj.id)
+        if pr:
+            remove_push_job(pr.id)
+
+    detail = AnalysisTaskDetailOut.model_validate(task)
+    detail.sources = _build_sources(task)
+    _attach_sub_configs(db, task, detail)
+    return detail
+
+
 @router.get("/{task_id}/sources", response_model=list[TaskSourceOut])
 def list_task_sources(
     task_id: int,
@@ -364,6 +400,8 @@ def run_task(
     task = db.get(AnalysisTask, task_id)
     if task is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="分析任务不存在")
+    if not task.enabled:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="分析任务已停用，请先启用")
     run_mode = "custom" if (req.mode == "custom" or (task.config or {}).get("mode") == "custom") else req.mode
     run = TaskRun(
         kind="analysis",
@@ -392,6 +430,8 @@ def run_schedule_now(
     task = db.get(AnalysisTask, task_id)
     if task is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="分析任务不存在")
+    if not task.enabled:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="分析任务已停用，请先启用")
     sj = db.scalar(select(ScheduledJob).where(ScheduledJob.task_id == task_id))
     if sj is None:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="该任务未配置定时分析")
@@ -422,6 +462,8 @@ def trigger_push(
     task = db.get(AnalysisTask, task_id)
     if task is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="分析任务不存在")
+    if not task.enabled:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="分析任务已停用，请先启用")
     pr = db.scalar(select(PushRule).where(PushRule.task_id == task_id))
     if pr is None:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="该任务未配置推送")

@@ -17,6 +17,7 @@
         <div class="grow">
           <div class="item-title">
             <h3>{{ t.name }}</h3>
+            <span class="pill" :class="t.enabled ? 'ok' : 'warning'">{{ t.enabled ? '已启用' : '已停用' }}</span>
             <span class="pill">{{ modeLabel(t.config?.mode as string | undefined) }}</span>
           </div>
           <p>{{ t.description || '无说明' }}</p>
@@ -31,16 +32,17 @@
           </div>
         </div>
         <div class="actions">
+          <button :class="t.enabled ? 'danger' : 'accent'" @click="onToggle(t)">{{ t.enabled ? '停止' : '启用' }}</button>
           <button @click="openDetail(t)">源状态</button>
           <template v-if="(t.config?.mode as string) === 'custom'">
-            <button class="accent" @click="onRun(t.id, 'custom')">运行分析</button>
+            <button class="accent" :disabled="!t.enabled" @click="onRun(t.id, 'custom')">运行分析</button>
           </template>
           <template v-else>
-            <button class="accent" @click="onRun(t.id, 'incremental')">增量</button>
-            <button @click="onRun(t.id, 'full')">全量</button>
+            <button class="accent" :disabled="!t.enabled" @click="onRun(t.id, 'incremental')">增量</button>
+            <button :disabled="!t.enabled" @click="onRun(t.id, 'full')">全量</button>
           </template>
-          <button v-if="t.schedule" @click="onRunSchedule(t.id)">立即执行</button>
-          <button v-if="t.push" @click="onTriggerPush(t.id)">立即推送</button>
+          <button v-if="t.schedule" :disabled="!t.enabled" @click="onRunSchedule(t.id)">立即执行</button>
+          <button v-if="t.push" :disabled="!t.enabled" @click="onTriggerPush(t.id)">立即推送</button>
           <button @click="openPushHistory(t)">推送历史</button>
           <button @click="goResults(t.id)">结果</button>
           <button @click="openEdit(t)">编辑</button>
@@ -377,7 +379,7 @@ import { useRouter } from 'vue-router'
 import { showToast } from '@/composables/toast'
 import { listSourcesApi, queryItemsApi, type InfoSource, type InfoItemBrief } from '@/api/sources'
 import {
-  listTasksApi, createTaskApi, updateTaskApi, deleteTaskApi, runTaskApi, getTaskApi,
+  listTasksApi, createTaskApi, updateTaskApi, deleteTaskApi, toggleTaskApi, runTaskApi, getTaskApi,
   runScheduleNowApi, triggerPushApi, listPushRunsApi,
   type AnalysisTaskDetail, type TaskSourceOut, type ScheduleConfig, type PushConfig,
 } from '@/api/tasks'
@@ -659,6 +661,12 @@ async function onDelete(t: AnalysisTaskDetail) {
   if (!confirm(`确认删除分析任务「${t.name}」？其定时与推送配置将一并删除。`)) return
   await deleteTaskApi(t.id)
   showToast('已删除')
+  await load()
+}
+
+async function onToggle(t: AnalysisTaskDetail) {
+  const updated = await toggleTaskApi(t.id)
+  showToast(updated.enabled ? '任务已启用' : '任务已停止')
   await load()
 }
 

@@ -56,6 +56,8 @@ def init_db() -> None:
     # Migrate pre-existing tables (create_all does not ALTER existing tables).
     _ensure_column(engine, "task_runs", "scheduled_job_id", "INTEGER")
     _ensure_column(engine, "task_runs", "refresh_detail", "JSON")
+    # AnalysisTask master switch: existing tasks remain enabled after upgrade.
+    _ensure_column(engine, "analysis_tasks", "enabled", "BOOLEAN NOT NULL DEFAULT 1")
     _ensure_column(engine, "info_sources", "site_status", "JSON NOT NULL DEFAULT '{}'")
     _ensure_column(engine, "info_items", "site_name", "TEXT")
     _ensure_column(engine, "info_items", "site_url", "TEXT")

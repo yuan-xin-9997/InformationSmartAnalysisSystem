@@ -156,6 +156,10 @@ def run_push(rule_id: int, trigger_mode: str) -> None:
         rule = db.get(PushRule, rule_id)
         if rule is None or not rule.enabled:
             return
+        task = db.get(AnalysisTask, rule.task_id) if rule.task_id else None
+        if task is not None and not task.enabled:
+            _logger.info("分析任务 %s 已停用，跳过推送", task.id)
+            return
 
         channel = get_channel(rule.channel)
         if channel is None:
@@ -220,6 +224,9 @@ def on_analysis_completed(task_id: int) -> None:
     """
     try:
         with SessionLocal() as db:
+            task = db.get(AnalysisTask, task_id)
+            if task is None or not task.enabled:
+                return
             rules = (
                 db.query(PushRule)
                 .filter(

@@ -53,6 +53,7 @@ export interface AnalysisTask {
   id: number
   name: string
   description: string
+  enabled: boolean
   config: Record<string, unknown>
   created_at: string
   updated_at: string
@@ -140,6 +141,8 @@ export const getTaskApi = (id: number) => request.get<unknown, AnalysisTaskDetai
 export const updateTaskApi = (id: number, data: TaskSaveBody) =>
   request.put<unknown, AnalysisTaskDetail>(`/api/analysis-tasks/${id}`, data)
 export const deleteTaskApi = (id: number) => request.delete<unknown, unknown>(`/api/analysis-tasks/${id}`)
+export const toggleTaskApi = (id: number) =>
+  request.post<unknown, AnalysisTaskDetail>(`/api/analysis-tasks/${id}/toggle`)
 export const runTaskApi = (id: number, mode: 'full' | 'incremental' | 'custom') =>
   request.post<unknown, { run_id: number; status: string }>(`/api/analysis-tasks/${id}/run`, { mode })
 

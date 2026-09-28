@@ -11,6 +11,7 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 
 from app.backend.core.database import SessionLocal
+from app.backend.models.analysis import AnalysisTask
 from app.backend.models.push import PushRule, PushRun
 from app.backend.models.scheduled_job import ScheduledJob
 
@@ -176,6 +177,65 @@ def test_schedule_forbidden_for_user(client):
         json={"name": "t", "source_ids": [], "schedule": _schedule_body()},
         headers=h,
     )
+    assert r.status_code == 403
+
+
+# ---------- task master switch ----------
+
+
+def test_toggle_task_blocks_and_restores_manual_run(client, admin_headers, monkeypatch):
+    _patch_sched(monkeypatch)
+    _patch_push_sched(monkeypatch)
+    tid = _make_task(client, admin_headers)
+    assert client.get(f"/api/analysis-tasks/{tid}", headers=admin_headers).json()["enabled"] is True
+
+    stopped = client.post(f"/api/analysis-tasks/{tid}/toggle", headers=admin_headers)
+    assert stopped.status_code == 200
+    assert stopped.json()["enabled"] is False
+    assert client.post(
+        f"/api/analysis-tasks/{tid}/run",
+        json={"mode": "incremental"},
+        headers=admin_headers,
+    ).status_code == 409
+
+    enabled = client.post(f"/api/analysis-tasks/{tid}/toggle", headers=admin_headers)
+    assert enabled.status_code == 200
+    assert enabled.json()["enabled"] is True
+    with SessionLocal() as db:
+        assert db.get(AnalysisTask, tid).enabled is True
+
+
+def test_toggle_task_synchronizes_schedule_and_push_jobs(client, admin_headers, monkeypatch):
+    from app.backend.api import analysis_tasks as api
+
+    calls: list[tuple[str, int]] = []
+    monkeypatch.setattr(api.sched_svc, "remove_scheduled_job", lambda jid: calls.append(("remove-schedule", jid)))
+    monkeypatch.setattr(api.sched_svc, "reschedule_scheduled_job", lambda sj: calls.append(("add-schedule", sj.id)))
+    monkeypatch.setattr(api, "remove_push_job", lambda rid: calls.append(("remove-push", rid)))
+    monkeypatch.setattr(api, "reschedule_push_job", lambda pr: calls.append(("add-push", pr.id)))
+
+    tid = _make_task(
+        client,
+        admin_headers,
+        schedule=_schedule_body(),
+        push=_push_body(),
+    )
+    calls.clear()
+    stopped = client.post(f"/api/analysis-tasks/{tid}/toggle", headers=admin_headers)
+    assert stopped.status_code == 200
+    assert {name for name, _ in calls} == {"remove-schedule", "remove-push"}
+    assert client.post(f"/api/analysis-tasks/{tid}/schedule/run", headers=admin_headers).status_code == 409
+    assert client.post(f"/api/analysis-tasks/{tid}/push/trigger", headers=admin_headers).status_code == 409
+
+    calls.clear()
+    enabled = client.post(f"/api/analysis-tasks/{tid}/toggle", headers=admin_headers)
+    assert enabled.status_code == 200
+    assert {name for name, _ in calls} == {"add-schedule", "add-push"}
+
+
+def test_toggle_task_requires_analysis_permission(client, admin_headers):
+    tid = _make_task(client, admin_headers)
+    r = client.post(f"/api/analysis-tasks/{tid}/toggle", headers=_tester_headers(client))
     assert r.status_code == 403
 
 

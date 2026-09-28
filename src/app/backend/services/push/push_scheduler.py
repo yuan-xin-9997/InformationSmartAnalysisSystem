@@ -14,12 +14,13 @@ from zoneinfo import ZoneInfo
 
 from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
-from sqlalchemy import select
+from sqlalchemy import or_, select
 
 from ...core.config import settings
 from ...core.database import SessionLocal
 from ...core.logging import get_logger
 from ...models.push import PushRule
+from ...models.analysis import AnalysisTask
 from .. import scheduler as sched_svc
 from .. import worker
 from .service import run_push
@@ -45,6 +46,14 @@ def _build_trigger(rule: PushRule):
 
 def _fire(rule_id: int) -> None:
     """Scheduler callback: submit a scheduled push."""
+    with SessionLocal() as db:
+        rule = db.get(PushRule, rule_id)
+        if rule is None or not rule.enabled:
+            return
+        task = db.get(AnalysisTask, rule.task_id) if rule.task_id else None
+        if task is not None and not task.enabled:
+            _logger.info("分析任务 %s 已停用，跳过定时推送", task.id)
+            return
     worker.submit(run_push, rule_id, "scheduled")
 
 
@@ -94,8 +103,12 @@ def start_push_scheduler() -> None:
         return
     with SessionLocal() as db:
         rules = db.scalars(
-            select(PushRule).where(
-                PushRule.enabled.is_(True), PushRule.trigger_mode == "scheduled"
+            select(PushRule)
+            .outerjoin(AnalysisTask, AnalysisTask.id == PushRule.task_id)
+            .where(
+                PushRule.enabled.is_(True),
+                PushRule.trigger_mode == "scheduled",
+                or_(PushRule.task_id.is_(None), AnalysisTask.enabled.is_(True)),
             )
         ).all()
         for rule in rules:

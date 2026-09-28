@@ -90,6 +90,9 @@ def _fire(job_id: int) -> None:
         if task is None:
             _logger.warning("定时任务 %s 关联分析任务不存在", job_id)
             return
+        if not task.enabled:
+            _logger.info("分析任务 %s 已停用，跳过定时执行", task.id)
+            return
         run = TaskRun(
             kind="analysis",
             ref_id=task.id,
@@ -155,7 +158,11 @@ def start_scheduler() -> None:
         timezone=_tz(),
     )
     with SessionLocal() as db:
-        jobs = db.scalars(select(ScheduledJob).where(ScheduledJob.enabled.is_(True))).all()
+        jobs = db.scalars(
+            select(ScheduledJob)
+            .join(AnalysisTask, AnalysisTask.id == ScheduledJob.task_id)
+            .where(ScheduledJob.enabled.is_(True), AnalysisTask.enabled.is_(True))
+        ).all()
         for sj in jobs:
             try:
                 _add_job(sj)

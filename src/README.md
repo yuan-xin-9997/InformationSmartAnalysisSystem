@@ -14,7 +14,7 @@
 核心能力：
 
 1. 信息源管理：支持「官方网站」「指定本地文件夹」「FreshRSS 指定源」三类信息源。
-2. 分析任务：创建任务并绑定多个信息源作为信息来源范围；支持逐条分析、汇总分析及不调用大模型的“文章清单（标题＋原文链接）”模式。
+2. 分析任务：创建任务并绑定多个信息源作为信息来源范围；支持逐条分析、汇总分析及不调用大模型的“文章清单（标题＋原文链接）”模式；任务卡片可一键停止或重新启用，停用期间暂停新的手动与定时执行。
 3. 增量分析：基于信息源新增内容做增量分析（按 (任务,源) 水位线记录已分析位置）；亦支持全量分析。
 4. 邮件推送：把增量分析结果按推送规则（选定任务/事件类型/收件人/触发方式）通过邮件推送到邮箱，支持「完成后自动 / 定时 / 手动」三种触发，SMTP 配置页面优先于 app.json。
 5. 基础模块：登录、权限管理、系统配置、任务中心（CLAUDE.md 规定必备）。
@@ -178,7 +178,7 @@ Linux 亦可使用 `systemctl start/stop/status/restart isas`。
 | 系统配置 | `GET /api/config` |
 | 任务中心 | `GET /api/task-center/runs`（支持 `ref_id`/`kind`/`status` 过滤）、`GET .../runs/{id}`、`GET .../runs/{id}/logs`、`DELETE .../runs/{id}` |
 | 信息源 | `GET /api/info-sources/types`、`GET/POST/PUT/DELETE /api/info-sources`、`POST .../{id}/check`、`POST .../{id}/sync`、`GET .../{id}/status`、`GET .../{id}/items` |
-| 分析任务 | `GET/POST/PUT/DELETE /api/analysis-tasks`、`POST .../{id}/run`、`POST .../{id}/push/trigger`、`GET .../{id}/push/runs`、`GET .../{id}/push/runs/{run_id}/preview`、`GET .../{id}/sources`、`GET .../{id}/results`（支持 `run_id` 过滤） |
+| 分析任务 | `GET/POST/PUT/DELETE /api/analysis-tasks`、`POST .../{id}/toggle`、`POST .../{id}/run`、`POST .../{id}/push/trigger`、`GET .../{id}/push/runs`、`GET .../{id}/push/runs/{run_id}/preview`、`GET .../{id}/sources`、`GET .../{id}/results`（支持 `run_id` 过滤） |
 | 定时任务 | `GET/POST /api/scheduled-jobs`、`PUT/DELETE /api/scheduled-jobs/{id}`、`POST .../{id}/toggle`、`POST .../{id}/run` |
 | 推送 | `GET/PUT /api/push/smtp`、`POST /api/push/smtp/test`、`GET/POST/PUT/DELETE /api/push/rules`、`POST /api/push/rules/{id}/trigger`、`GET /api/push/rules/{id}/runs` |
 

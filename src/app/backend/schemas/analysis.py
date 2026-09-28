@@ -51,6 +51,7 @@ class AnalysisTaskOut(ORMBase):
     id: int
     name: str
     description: str
+    enabled: bool
     config: dict
     created_at: BeijingDatetime
     updated_at: BeijingDatetime
