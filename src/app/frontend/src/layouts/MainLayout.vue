@@ -5,7 +5,7 @@
         <div class="brand-mark small">信</div>
         <div><strong>信息智能分析</strong><small>ISAS</small></div>
       </div>
-      <nav>
+      <nav aria-label="主导航">
         <button
           v-for="item in visibleMenus"
           :key="item.path"
@@ -21,7 +21,7 @@
           <strong>{{ auth.user?.username }}</strong>
           <small>{{ auth.isAdmin ? '管理员' : '普通用户' }}</small>
         </div>
-        <button title="退出" @click="onLogout">↗</button>
+        <button type="button" title="退出登录" aria-label="退出登录" @click="onLogout">↗</button>
       </div>
     </aside>
 

@@ -36,3 +36,72 @@
 .sortable:hover{color:#5776e8}
 .link{background:none;border:none;color:#5776e8;cursor:pointer;padding:0;font-size:12px;text-decoration:underline}
 .item-preview-modal{z-index:21}
+
+/* Responsive application shell and shared mobile behavior. */
+html{-webkit-text-size-adjust:100%}
+body{min-width:320px}
+button{touch-action:manipulation}
+.toolbar{gap:14px}
+.button-row,.actions{flex-wrap:wrap}
+.dashboard-stats{grid-template-columns:repeat(3,minmax(0,1fr));gap:14px}
+
+@media(max-width:900px){
+  .app-shell aside{position:sticky;z-index:10;top:0;display:grid;grid-template-columns:1fr auto;box-shadow:0 5px 18px #10152230}
+  .logo{padding-bottom:9px}
+  .logo .brand-mark{width:34px;height:34px}
+  .app-shell aside nav{grid-column:1/-1;grid-row:2;overflow-x:auto;overscroll-behavior-inline:contain;scrollbar-width:none;padding-bottom:1px}
+  .app-shell aside nav::-webkit-scrollbar{display:none}
+  .app-shell aside nav button{flex:0 0 auto;min-height:42px;padding:7px 10px}
+  .account{display:grid;grid-column:2;grid-row:1;margin:0;padding:0;border:0;grid-template-columns:30px auto 30px}
+  .account .avatar{width:30px;height:30px}
+  .account small{display:none}
+}
+
+@media(max-width:600px){
+  .content,.workspace>header{padding-left:14px;padding-right:14px}
+  .content{padding-top:20px;padding-bottom:36px}
+  .workspace>header{min-height:112px;padding-top:20px}
+  .workspace h1{font-size:27px}
+  .workspace header>div>p:last-child{font-size:13px;line-height:1.45}
+  .logo strong{font-size:14px}
+  .logo small{display:none}
+  .account{grid-template-columns:28px auto 30px}
+  .account .avatar{width:28px;height:28px}
+  .account strong{max-width:72px;overflow:hidden;text-overflow:ellipsis}
+  .app-shell aside nav button{min-height:44px}
+  .toolbar{align-items:stretch;flex-direction:column}
+  .toolbar>.stats{order:-1}
+  .toolbar .button-row{width:100%}
+  .toolbar .button-row>button{flex:1 1 auto;min-height:42px}
+  .toolbar .button-row>input,.toolbar .button-row>select{flex:1 1 130px;width:auto!important;min-width:0}
+  .actions{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));width:100%}
+  .actions button{min-height:42px;padding:9px 7px}
+  .item-card{padding:14px;gap:11px}
+  .item-title{align-items:flex-start;flex-wrap:wrap}
+  .item-title h3{white-space:normal;overflow-wrap:anywhere}
+  .dashboard-stats{grid-template-columns:1fr}
+  .dashboard-stats .item-card{flex-wrap:nowrap}
+  .panel{padding:14px;max-width:100%;overflow-x:auto}
+  .panel-head{gap:12px}
+  .log-row{grid-template-columns:10px minmax(0,1fr);gap:9px}
+  .log-row time{grid-column:2;overflow-wrap:anywhere}
+  .modal{padding:0;place-items:end center}
+  .modal-card,.modal-card.large,.modal-card.preview-card{width:100%;max-width:none;max-height:94dvh;border-radius:18px 18px 0 0;padding:18px 14px;padding-bottom:max(18px,env(safe-area-inset-bottom))}
+  .modal-head{gap:12px}
+  .modal-head>div{min-width:0}
+  .modal-head h2{font-size:20px;overflow-wrap:anywhere}
+  .modal-head>button{min-width:44px;min-height:44px}
+  .modal-actions{position:sticky;bottom:0;background:#fff;padding-top:12px;padding-bottom:env(safe-area-inset-bottom)}
+  .modal-actions button{min-height:44px;flex:1}
+  .modal-card table{min-width:560px}
+  .tabs{overflow-x:auto}
+  .tabs button{flex:0 0 auto;min-height:44px}
+  .preview-iframe{height:70dvh}
+  dl{grid-template-columns:1fr}
+  dt{padding-bottom:2px;border-bottom:0;font-weight:700}
+  dd{padding-top:2px}
+  .figure-thumb{width:92px;height:92px}
+  .toast{left:14px;right:14px;bottom:max(14px,env(safe-area-inset-bottom));max-width:none}
+  .login-card{padding:30px 22px}
+  .empty{min-height:180px;padding:20px;text-align:center}
+}

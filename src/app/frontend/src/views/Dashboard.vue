@@ -1,6 +1,6 @@
 <template>
   <div>
-    <div class="item-list" style="grid-template-columns:1fr 1fr 1fr;gap:14px">
+    <div class="item-list dashboard-stats">
       <div class="item-card" style="cursor:default">
         <div class="file-icon">源</div>
         <div class="grow">
